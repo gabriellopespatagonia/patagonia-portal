@@ -1,5 +1,12 @@
 # Roteiro de publicação — Patagonia Business
 
+> **Situação atual**
+> - Site criado no Azure: **https://green-wave-0e66b3310.8.azurestaticapps.net** (assinatura "Patagonia Portal", grupo `patagonia-portal`, plano Free).
+> - Aplicativo do Entra ID: "Patagonia Portal API".
+>   - ID do aplicativo (cliente): `0dfe4a5a-8360-4b3a-9188-54ae016e8e07`
+>   - ID do diretório (locatário): `26bc7af6-a1dd-4892-b994-48ccb40c4564`
+> - A publicação é feita pelo GitHub Actions (`.github/workflows/azure-static-web-apps.yml`). Ela exige o segredo `AZURE_STATIC_WEB_APPS_API_TOKEN` no repositório.
+
 ## Já está pronto
 - **Código** em um repositório Git local, com o primeiro commit. O `.gitignore` impede o envio de arquivos de segredo.
 - **SharePoint**, no site **PatagoniaBusiness.BPOFinanceiro → Documentos Compartilhados → Portal**:
