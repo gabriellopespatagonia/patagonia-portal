@@ -249,7 +249,10 @@
     e.preventDefault(); const msg = simTa.value.trim(); if (!msg) return; simTa.value = "";
     simMsg(msg, "user"); const esp = simMsg("Ajustando premissas…", "bot", "loading");
     try {
-      const r = await PB.api.post("/premissas", { clienteId, mensagem: msg, premissas, historico: simHist.slice(-8) });
+      // sem IA no servidor, usa a interpretação local dos comandos mais comuns
+      const r = document.body.classList.contains("sem-ia")
+        ? PB.projecao.interpretarLocal(msg, premissas, dados)
+        : await PB.api.post("/premissas", { clienteId, mensagem: msg, premissas, historico: simHist.slice(-8) });
       premissas = { ...PB.projecao.padrao(), ...r.premissas };
       esp.classList.remove("loading"); esp.textContent = r.resposta;
       simHist.push({ role: "user", content: msg }, { role: "assistant", content: r.resposta });

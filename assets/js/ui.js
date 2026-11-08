@@ -128,7 +128,7 @@
       box.innerHTML = `<div class="resumo-head"><b>${PB.esc(r.titulo)}</b><button type="button" class="link-btn" data-x>Fechar</button></div>
         <ul>${r.obs.map((o) => `<li>${PB.esc(o)}</li>`).join("")}</ul>
         <div class="resumo-ia"></div>
-        <button type="button" class="btn btn-dark btn-sm" data-ia>Aprofundar a análise com o Claude</button>`;
+        <button type="button" class="btn btn-dark btn-sm so-ia" data-ia>Aprofundar a análise com o Claude</button>`;
       box.querySelector("[data-x]").onclick = () => { aberto = false; box.classList.add("hidden"); };
       box.querySelector("[data-ia]").onclick = async (e) => {
         const alvoIA = box.querySelector(".resumo-ia"); e.target.disabled = true;
@@ -180,6 +180,12 @@
     const el = document.querySelector(".side-foot");
     if (el) el.innerHTML = `<b>${PB.esc(u.nome || u.email)}</b><span>${u.papel === "consultor" ? "Consultor / BPO" : "Cliente"}</span><br><button class="side-link" style="padding:8px 0;margin-top:6px" id="btn-sair">↩ Sair</button>`;
     document.getElementById("btn-sair")?.addEventListener("click", PB.auth.sair);
+    // Sem chave do Claude no servidor: esconde os recursos de IA (classe .so-ia)
+    if (u.iaAtiva === false) {
+      document.body.classList.add("sem-ia");
+      const c = document.getElementById("ex-ia"); if (c) c.checked = false;
+      if (location.hash === "#assistente") history.replaceState(null, "", location.pathname);
+    }
     if (PB.isDemo()) document.querySelector(".main").insertAdjacentHTML("afterbegin", `<div class="demo-banner"><b>Modo demonstração</b> — dados fictícios, sem servidor. Publicado no Azure, o portal usa os dados reais do SharePoint.</div>`);
   };
 })();

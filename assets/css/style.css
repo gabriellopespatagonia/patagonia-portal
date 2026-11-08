@@ -62,6 +62,7 @@ p { margin: 0 0 1em; }
 .container { width: min(1160px, 100% - 40px); margin-inline: auto; }
 .muted { color: var(--muted); }
 .hidden { display: none !important; }
+.sem-ia .so-ia { display: none !important; }
 
 /* Rótulo de seção — caixa alta espaçada, como nos materiais da marca */
 .eyebrow, .overline {

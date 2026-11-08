@@ -2,6 +2,7 @@
 const { app } = require("@azure/functions");
 const sp = require("../lib/graph");
 const { perfil, exigirConsultor, exigirAcessoCliente, httpErro, rota, invalidarCache } = require("../lib/acesso");
+const { iaAtiva } = require("../lib/claude");
 
 const PASTAS = ["relatorios", "bruto", "publicado", "contratos"];
 const PASTAS_CLIENTE = ["relatorios"]; // o que o cliente final pode ver/baixar
@@ -10,7 +11,7 @@ const nomeSeguro = (n) => String(n || "").replace(/[\\/:*?"<>|#%]/g, "_").slice(
 // GET /api/perfil → dados do usuário logado
 app.http("perfil", {
   methods: ["GET"], authLevel: "anonymous", route: "perfil",
-  handler: rota(async (req) => { const u = await perfil(req); return { nome: u.nome, papel: u.papel, clienteId: u.clienteId }; })
+  handler: rota(async (req) => { const u = await perfil(req); return { nome: u.nome, papel: u.papel, clienteId: u.clienteId, iaAtiva: iaAtiva() }; })
 });
 
 // GET/POST/PATCH /api/clientes
