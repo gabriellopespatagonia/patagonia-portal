@@ -4,14 +4,30 @@
 //   "ana@alfa.com.br":            { "nome": "Ana Souza", "papel": "cliente",   "clienteId": "alfa-distribuidora" },
 //   "gabriel.lopes@patagoniaconsultoria.com.br": { "nome": "Gabriel", "papel": "consultor" }
 // }
+//
+// O usuário pode estar logado de duas formas:
+//   1. conta Microsoft (login do Azure Static Web Apps — cabeçalho x-ms-client-principal);
+//   2. código por e-mail (cookie de sessão assinado — ver lib/sessao.js).
 const { lerJson } = require("./graph");
+const { emailDaSessao } = require("./sessao");
 
 let cache = { usuarios: null, em: 0 };
 
-function principal(request) {
+/** E-mail do usuário logado (Microsoft ou código por e-mail), ou null. */
+function emailLogado(request) {
   const h = request.headers.get("x-ms-client-principal");
-  if (!h) return null;
-  try { return JSON.parse(Buffer.from(h, "base64").toString("utf8")); } catch { return null; }
+  if (h) {
+    try { const p = JSON.parse(Buffer.from(h, "base64").toString("utf8")); if (p && p.userDetails) return String(p.userDetails).toLowerCase(); } catch { }
+  }
+  const e = emailDaSessao(request);
+  return e ? e.toLowerCase() : null;
+}
+
+/** Cadastro do e-mail em usuarios.json (ou null). */
+async function usuarioCadastrado(email) {
+  const lista = await usuarios();
+  const chave = Object.keys(lista).find((k) => k.toLowerCase() === String(email).toLowerCase());
+  return chave ? { email: chave.toLowerCase(), ...lista[chave] } : null;
 }
 
 async function usuarios() {
@@ -23,13 +39,11 @@ async function usuarios() {
 
 /** Retorna { email, nome, papel, clienteId } ou lança erro 401/403. */
 async function perfil(request) {
-  const p = principal(request);
-  if (!p) throw httpErro(401, "Não autenticado");
-  const email = String(p.userDetails || "").toLowerCase();
-  const lista = await usuarios();
-  const chave = Object.keys(lista).find((k) => k.toLowerCase() === email);
-  if (!chave) throw httpErro(403, "Usuário não cadastrado no portal");
-  return { email, ...lista[chave] };
+  const email = emailLogado(request);
+  if (!email) throw httpErro(401, "Não autenticado");
+  const u = await usuarioCadastrado(email);
+  if (!u) throw httpErro(403, "Usuário não cadastrado no portal");
+  return { ...u, email };
 }
 
 async function exigirConsultor(request) {
@@ -59,4 +73,4 @@ const rota = (fn) => async (request, context) => {
   }
 };
 
-module.exports = { perfil, exigirConsultor, exigirAcessoCliente, httpErro, rota, invalidarCache: () => (cache.usuarios = null) };
+module.exports = { perfil, usuarioCadastrado, exigirConsultor, exigirAcessoCliente, httpErro, rota, invalidarCache: () => (cache.usuarios = null) };

@@ -51,16 +51,26 @@ app.http("acessos", {
     if (todos[e] && todos[e].papel === "consultor") throw httpErro(409, "Este e-mail pertence a um consultor");
     todos[e] = { nome: nome || e, papel: "cliente", clienteId, criadoEm: new Date().toISOString(), criadoPor: quem.email };
     await sp.gravarJson("config/usuarios.json", todos); invalidarCache();
-    if (enviarConvite) {
-      await sp.enviarEmail({ para: e, assunto: "Seu acesso ao portal Patagonia Business", html: modeloEmail(`Olá, ${esc(nome)}!`, `
-        <p>Seu acesso ao portal de relatórios financeiros e comerciais foi liberado.</p>
-        <p><a href="${urlPortal()}/login.html" style="background:#2e8b8b;color:#fff;padding:10px 18px;border-radius:20px;text-decoration:none;display:inline-block">Acessar o portal</a></p>
-        <p>Clique em <b>Entrar com conta Microsoft</b> e use este e-mail (<b>${esc(e)}</b>). Se ele ainda não for uma conta Microsoft, escolha <b>Criar conta</b> na tela da Microsoft e defina sua senha.</p>`) });
-    }
+    if (enviarConvite) await enviarConviteCliente(e, nome);
     return { ok: true, convite: !!enviarConvite };
   })
 });
 
+/** Convite / instruções de acesso do cliente (login por código enviado ao e-mail, sem senha). */
+function enviarConviteCliente(email, nome) {
+  return sp.enviarEmail({ para: email, assunto: "Seu acesso ao portal Patagonia Business", html: modeloEmail(`Olá, ${esc(nome)}!`, `
+    <p>Seu acesso ao portal de relatórios financeiros e comerciais da Patagonia Business está liberado.</p>
+    <p><a href="${urlPortal()}/login.html" style="background:#0070bd;color:#fff;padding:10px 18px;border-radius:20px;text-decoration:none;display:inline-block">Acessar o portal</a></p>
+    <p><b>Como entrar:</b></p>
+    <ol>
+      <li>Abra o portal e informe este e-mail: <b>${esc(email)}</b></li>
+      <li>Você receberá um <b>código de 6 dígitos</b> neste mesmo e-mail.</li>
+      <li>Digite o código e pronto — não é preciso criar nem lembrar senha.</li>
+    </ol>
+    <p style="color:#5b6b7d">Funciona com qualquer e-mail (Gmail, Outlook, e-mail da sua empresa etc.).</p>`) });
+}
+
+// Clientes não têm senha (acesso por código): este botão reenvia as instruções de acesso.
 app.http("acessosRedefinir", {
   methods: ["POST"], authLevel: "anonymous", route: "acessos/redefinir",
   handler: rota(async (req) => {
@@ -70,15 +80,7 @@ app.http("acessosRedefinir", {
     const { lista } = await usuariosDoCliente(clienteId);
     const u = lista.find((x) => x.email.toLowerCase() === String(email).toLowerCase());
     if (!u) throw httpErro(404, "E-mail não cadastrado para este cliente");
-    await sp.enviarEmail({ para: u.email, assunto: "Redefinição de senha — portal Patagonia Business", html: modeloEmail("Redefinição de senha", `
-      <p>Olá, ${esc(u.nome)}. Recebemos uma solicitação para redefinir a senha do seu acesso ao portal.</p>
-      <p>Como o login é feito com a sua conta Microsoft, a troca de senha é feita diretamente na Microsoft:</p>
-      <ul>
-        <li><b>E-mail pessoal</b> (Gmail, Hotmail, Outlook etc.): <a href="https://account.live.com/password/reset">account.live.com/password/reset</a></li>
-        <li><b>E-mail corporativo</b> (Microsoft 365 da sua empresa): <a href="https://passwordreset.microsoftonline.com/">passwordreset.microsoftonline.com</a></li>
-      </ul>
-      <p>Depois de redefinir, acesse <a href="${urlPortal()}/login.html">${urlPortal()}</a>.</p>
-      <p style="color:#5d6f7c">Se você não pediu a redefinição, ignore este e-mail.</p>`) });
+    await enviarConviteCliente(u.email, u.nome);
     return { ok: true };
   })
 });

@@ -128,15 +128,29 @@
       if (PB.isDemo()) {
         try { return JSON.parse(sessionStorage.getItem(SESSAO)); } catch { return null; }
       }
+      // Vale para os dois tipos de login (conta Microsoft ou código por e-mail):
+      // o servidor identifica o usuário e devolve { email, nome, papel, clienteId }.
       try {
-        const r = await fetch("/.auth/me");
-        const { clientPrincipal } = await r.json();
-        if (!clientPrincipal) return null;
-        // { nome, papel, clienteId } — vem do cadastro de usuários no SharePoint
-        const perfil = await PB.api.get("/perfil").catch(() => null);
-        if (!perfil) return { email: clientPrincipal.userDetails, semCadastro: true };
-        return { email: clientPrincipal.userDetails, ...perfil };
+        const r = await fetch(CFG.apiBase + "/perfil", { credentials: "include" });
+        if (r.status === 401) return null;
+        if (r.status === 403) return { semCadastro: true };
+        if (!r.ok) return null;
+        return await r.json();
       } catch { return null; }
+    },
+    /** Envia o código de acesso por e-mail. Retorna { desafio, mensagem }. */
+    async pedirCodigo(email) {
+      const r = await fetch(CFG.apiBase + "/auth/codigo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.erro || "Não foi possível enviar o código.");
+      return j;
+    },
+    /** Confere o código e cria a sessão. Retorna { papel }. */
+    async entrarComCodigo(desafio, codigo) {
+      const r = await fetch(CFG.apiBase + "/auth/entrar", { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ desafio, codigo }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.erro || "Não foi possível entrar.");
+      return j;
     },
     loginDemo(email, senha) {
       const u = CFG.usuariosDemo.find((x) => x.email.toLowerCase() === email.trim().toLowerCase() && x.senha === senha);
@@ -148,9 +162,12 @@
     loginMicrosoft(destino) {
       location.href = `/.auth/login/${CFG.provedorLogin}?post_login_redirect_uri=${encodeURIComponent(destino)}`;
     },
-    sair() {
+    async sair() {
       sessionStorage.removeItem(SESSAO);
-      location.href = PB.isDemo() ? PB.raiz() + "login.html" : "/.auth/logout?post_logout_redirect_uri=/";
+      if (PB.isDemo()) { location.href = PB.raiz() + "login.html"; return; }
+      // encerra a sessão por código e, se houver, a da conta Microsoft
+      await fetch(CFG.apiBase + "/auth/sair", { method: "POST", credentials: "include" }).catch(() => { });
+      location.href = "/.auth/logout?post_logout_redirect_uri=/login.html";
     },
     async exigir(papel) {
       const u = await PB.auth.usuario();

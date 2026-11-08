@@ -37,13 +37,32 @@
 
       <div id="alerta"></div>
 
-      <!-- Login de produção: Microsoft 365 / Entra ID -->
-      <div id="bloco-microsoft">
-        <button class="btn btn-primary" style="width:100%" id="btn-ms">
+      <!-- Login de produção: código enviado por e-mail (qualquer e-mail cadastrado) -->
+      <div id="bloco-codigo">
+        <form id="form-email">
+          <div class="field"><label for="cod-email">E-mail</label><input id="cod-email" type="email" autocomplete="email" required placeholder="seu@email.com.br"></div>
+          <button class="btn btn-primary" style="width:100%" type="submit" id="btn-enviar">Receber código de acesso</button>
+          <p class="muted" style="font-size:13px;margin-top:10px">Enviaremos um código de 6 dígitos para o e-mail cadastrado pela Patagonia Business. Não é preciso criar senha.</p>
+        </form>
+        <form id="form-codigo" class="hidden">
+          <p style="font-size:14px">Enviamos um código para <b id="cod-destino"></b>. Ele vale por 10 minutos.</p>
+          <div class="field"><label for="cod-numero">Código de acesso</label>
+            <input id="cod-numero" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required placeholder="000000" style="font-size:24px;letter-spacing:10px;text-align:center"></div>
+          <button class="btn btn-primary" style="width:100%" type="submit" id="btn-entrar">Entrar</button>
+          <p style="font-size:13px;margin-top:12px;display:flex;justify-content:space-between">
+            <button type="button" class="link-btn" id="btn-outro">Usar outro e-mail</button>
+            <button type="button" class="link-btn" id="btn-reenviar">Reenviar código</button>
+          </p>
+        </form>
+      </div>
+
+      <!-- Consultores: também podem entrar com a conta Microsoft da empresa -->
+      <div id="bloco-microsoft" class="hidden">
+        <div class="divider">ou</div>
+        <button class="btn btn-outline" style="width:100%" id="btn-ms">
           <svg width="18" height="18" viewBox="0 0 21 21"><path fill="#f25022" d="M0 0h10v10H0z"/><path fill="#7fba00" d="M11 0h10v10H11z"/><path fill="#00a4ef" d="M0 11h10v10H0z"/><path fill="#ffb900" d="M11 11h10v10H11z"/></svg>
-          Entrar com conta Microsoft
+          Entrar com a conta Microsoft da Patagonia
         </button>
-        <p class="muted" style="font-size:13px;margin-top:10px">Use o e-mail cadastrado pela Patagonia Business. No primeiro acesso você receberá um convite por e-mail para definir sua senha.</p>
       </div>
 
       <!-- Login de demonstração (visualização local) -->
@@ -76,14 +95,46 @@
     papel = p;
     botoes.forEach((b) => b.classList.toggle("active", b.dataset.papel === p));
     if (PB.isDemo()) renderAtalhos();
+    else document.getElementById("bloco-microsoft").classList.toggle("hidden", p !== "consultor");
   }
   botoes.forEach((b) => b.addEventListener("click", () => setPapel(b.dataset.papel)));
 
   if (PB.isDemo()) {
-    document.getElementById("bloco-microsoft").classList.add("hidden");
+    document.getElementById("bloco-codigo").classList.add("hidden");
     document.getElementById("form-demo").classList.remove("hidden");
-    alerta("<b>Modo demonstração.</b> Você está vendo o site localmente, com dados fictícios. Ao publicar no Azure, o login passa a ser feito pela Microsoft.", "warn");
+    alerta("<b>Modo demonstração.</b> Você está vendo o site localmente, com dados fictícios. Publicado, o acesso é feito por código enviado ao e-mail cadastrado.", "warn");
   }
+
+  /* ---------- Login por código enviado por e-mail ---------- */
+  let desafio = null, emailAtual = "";
+  const $ = (id) => document.getElementById(id);
+  async function enviarCodigo() {
+    emailAtual = $("cod-email").value.trim();
+    $("btn-enviar").disabled = true; $("btn-enviar").textContent = "Enviando…";
+    try {
+      const r = await PB.auth.pedirCodigo(emailAtual);
+      desafio = r.desafio;
+      $("cod-destino").textContent = emailAtual;
+      $("form-email").classList.add("hidden"); $("form-codigo").classList.remove("hidden");
+      alerta(r.mensagem, "info");
+      $("cod-numero").value = ""; $("cod-numero").focus();
+    } catch (err) { alerta(PB.esc(err.message), "error"); }
+    $("btn-enviar").disabled = false; $("btn-enviar").textContent = "Receber código de acesso";
+  }
+  $("form-email").addEventListener("submit", (e) => { e.preventDefault(); enviarCodigo(); });
+  $("btn-reenviar").addEventListener("click", enviarCodigo);
+  $("btn-outro").addEventListener("click", () => { desafio = null; alerta(""); $("form-codigo").classList.add("hidden"); $("form-email").classList.remove("hidden"); $("cod-email").focus(); });
+  $("form-codigo").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("btn-entrar").disabled = true; $("btn-entrar").textContent = "Entrando…";
+    try {
+      const r = await PB.auth.entrarComCodigo(desafio, $("cod-numero").value);
+      location.href = r.papel === "consultor" ? "consultor/index.html" : "cliente/index.html";
+    } catch (err) {
+      alerta(PB.esc(err.message), "error");
+      $("btn-entrar").disabled = false; $("btn-entrar").textContent = "Entrar";
+    }
+  });
 
   function renderAtalhos() {
     document.getElementById("atalhos").innerHTML = PB_CONFIG.usuariosDemo

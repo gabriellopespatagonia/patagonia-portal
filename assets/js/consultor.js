@@ -377,12 +377,12 @@
     try {
       const lista = await PB.api.get(`/acessos?cliente=${encodeURIComponent(clienteId)}`);
       el.innerHTML = lista.length ? lista.map((a) => `<div class="acesso-row"><div><b>${PB.esc(a.nome || "")}</b><br><span class="muted" style="font-size:13px">${PB.esc(a.email)}</span></div>
-        <div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm" data-reset="${PB.esc(a.email)}">Enviar redefinição de senha</button>
+        <div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm" data-reset="${PB.esc(a.email)}">Reenviar instruções de acesso</button>
         <button class="btn btn-outline btn-sm" style="color:var(--red-500)" data-rm="${PB.esc(a.email)}">Remover acesso</button></div></div>`).join("")
         : `<div class="alert alert-warn">Nenhum e-mail com acesso a este cliente.</div>`;
       el.querySelectorAll("[data-reset]").forEach((b) => b.addEventListener("click", async () => {
-        if (!confirm(`Enviar e-mail de redefinição de senha para ${b.dataset.reset}?`)) return;
-        try { const r = await PB.api.post("/acessos/redefinir", { clienteId, email: b.dataset.reset }); alert(r.simulado ? "Modo demonstração: o e-mail seria enviado agora." : "E-mail de redefinição enviado."); } catch (e) { alert("Erro: " + e.message); }
+        if (!confirm(`Reenviar as instruções de acesso para ${b.dataset.reset}?`)) return;
+        try { const r = await PB.api.post("/acessos/redefinir", { clienteId, email: b.dataset.reset }); alert(r.simulado ? "Modo demonstração: o e-mail seria enviado agora." : "Instruções de acesso enviadas."); } catch (e) { alert("Erro: " + e.message); }
       }));
       el.querySelectorAll("[data-rm]").forEach((b) => b.addEventListener("click", async () => {
         if (!confirm(`Remover o acesso de ${b.dataset.rm} ao portal? A pessoa não conseguirá mais ver os dados deste cliente.`)) return;

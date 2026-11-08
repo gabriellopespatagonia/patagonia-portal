@@ -11,7 +11,7 @@ const nomeSeguro = (n) => String(n || "").replace(/[\\/:*?"<>|#%]/g, "_").slice(
 // GET /api/perfil → dados do usuário logado
 app.http("perfil", {
   methods: ["GET"], authLevel: "anonymous", route: "perfil",
-  handler: rota(async (req) => { const u = await perfil(req); return { nome: u.nome, papel: u.papel, clienteId: u.clienteId, iaAtiva: iaAtiva() }; })
+  handler: rota(async (req) => { const u = await perfil(req); return { email: u.email, nome: u.nome, papel: u.papel, clienteId: u.clienteId, iaAtiva: iaAtiva() }; })
 });
 
 // GET/POST/PATCH /api/clientes
