@@ -1,0 +1,32 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "AzureWebJobsFeatureFlags": "EnableWorkerIndexing",
+
+    "GRAPH_TENANT_ID": "<id do tenant Microsoft 365>",
+    "GRAPH_CLIENT_ID": "<id do aplicativo registrado no Entra ID>",
+    "GRAPH_CLIENT_SECRET": "<segredo do aplicativo>",
+    "SHAREPOINT_HOST": "patagoniaconsultoriarp.sharepoint.com",
+    "SHAREPOINT_SITE_PATH": "/sites/PatagoniaBusiness.BPOFinanceiro",
+    "SHAREPOINT_PASTA_RAIZ": "Portal",
+
+    "PORTAL_URL": "https://portal.patagoniabusiness.com.br",
+    "MAIL_REMETENTE": "portal@patagoniaconsultoria.com.br",
+
+    "ANTHROPIC_API_KEY": "<chave da API do Claude>",
+    "CLAUDE_MODEL": "claude-opus-5-5",
+    "BENCHMARK_DOMINIOS": "",
+
+    "CONTAAZUL_CLIENT_ID": "<client id do app no portal developers.contaazul.com>",
+    "CONTAAZUL_CLIENT_SECRET": "<client secret>",
+    "CONTAAZUL_REDIRECT_URI": "https://portal.patagoniabusiness.com.br/api/contaazul/callback",
+    "CONTAAZUL_STATE_SECRET": "<texto aleatório longo>",
+    "CONTAAZUL_AUTH_URL": "https://auth.contaazul.com/login",
+    "CONTAAZUL_TOKEN_URL": "https://auth.contaazul.com/oauth2/token",
+    "CONTAAZUL_API_URL": "https://api-v2.contaazul.com",
+    "CONTAAZUL_PATH_RECEBER": "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+    "CONTAAZUL_PATH_PAGAR": "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+    "CONTAAZUL_PATH_VENDAS": "/v1/venda/busca"
+  }
+}

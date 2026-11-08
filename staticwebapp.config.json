@@ -1,0 +1,21 @@
+{
+  "routes": [
+    { "route": "/cliente/*", "allowedRoles": ["authenticated"] },
+    { "route": "/consultor/*", "allowedRoles": ["authenticated"] },
+    { "route": "/api/*", "allowedRoles": ["authenticated"] },
+    { "route": "/.auth/login/github", "statusCode": 404 },
+    { "route": "/.auth/login/twitter", "statusCode": 404 },
+    { "route": "/servidor-local.ps1", "statusCode": 404 }
+  ],
+  "responseOverrides": {
+    "401": { "redirect": "/login.html", "statusCode": 302 },
+    "403": { "redirect": "/login.html?erro=403", "statusCode": 302 }
+  },
+  "globalHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob: https://images.unsplash.com; connect-src 'self' https://images.unsplash.com https://fonts.googleapis.com https://fonts.gstatic.com"
+  },
+  "platform": { "apiRuntime": "node:20" }
+}

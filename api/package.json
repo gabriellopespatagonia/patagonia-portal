@@ -1,0 +1,16 @@
+{
+  "name": "patagonia-business-api",
+  "version": "1.0.0",
+  "description": "API do portal Patagonia Business (Azure Functions): SharePoint via Microsoft Graph e Claude",
+  "main": "src/functions/*.js",
+  "scripts": {
+    "start": "func start"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "latest",
+    "@azure/functions": "^4.5.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

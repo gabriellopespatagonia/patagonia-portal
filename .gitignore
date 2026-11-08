@@ -1,0 +1,17 @@
+# Segredos e configurações locais — NUNCA enviar ao GitHub
+api/local.settings.json
+.env
+*.env
+*.pfx
+*.key
+
+# Dependências e artefatos
+node_modules/
+api/node_modules/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Arquivos temporários do Office
+~$*

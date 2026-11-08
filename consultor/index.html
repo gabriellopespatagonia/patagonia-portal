@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Área do Consultor | Patagonia Business</title>
+  <link rel="icon" href="../assets/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="../assets/img/favicon.png">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,500&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html" aria-label="Patagonia Business"><span class="logo logo-branco"></span><small>Consultor & BPO</small></a>
+
+    <button class="side-link" data-view="clientes"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="6" r="3"/><path d="M1 16c0-3 3-5 6-5s6 2 6 5M12 3a3 3 0 010 6M17 16c0-2-1.3-3.6-3.3-4.3"/></svg>Clientes</button>
+
+    <div class="side-group">Manutenção de dados</div>
+    <button class="side-link" data-view="importar"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 2v10M5 8l4 4 4-4M2 15h14"/></svg>Importar e publicar</button>
+    <button class="side-link" data-view="plano"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h12M3 9h12M3 14h7"/></svg>Plano de contas</button>
+    <button class="side-link" data-view="modelos"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="14" height="14" rx="2"/><path d="M2 7h14M7 7v9"/></svg>Modelos de planilha</button>
+
+    <div class="side-group">Repositório & IA</div>
+    <button class="side-link" data-view="sharepoint"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 5h5l2 2h7v8H2z"/></svg>SharePoint</button>
+    <button class="side-link" data-view="assistente"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h12v8H8l-4 3v-3H3z"/></svg>Assistente IA</button>
+
+    <div class="side-group">Administração</div>
+    <button class="side-link" data-view="equipe"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="6" r="3"/><path d="M3 16c0-3.3 2.7-5 6-5s6 1.7 6 5"/><path d="M14 2.5l1 1.8 2 .3-1.5 1.4.4 2-1.9-1-1.9 1 .4-2L11 4.6l2-.3z" stroke-width="1.4"/></svg>Equipe de consultores</button>
+
+    <div class="side-foot"></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="menu-btn" aria-label="Menu">☰</button>
+        <h1 id="titulo">Clientes</h1>
+      </div>
+      <div class="filters" id="filtro-cliente">
+        <label for="sel-cliente" style="margin:0" class="muted">Cliente em edição:</label>
+        <select id="sel-cliente"></select>
+      </div>
+    </header>
+
+    <div class="content">
+
+      <!-- ============ CLIENTES ============ -->
+      <section class="view" id="view-clientes">
+        <div class="panel">
+          <div class="panel-head"><h2>Carteira de clientes</h2><button class="btn btn-primary btn-sm" id="btn-novo">+ Novo cliente</button></div>
+          <div id="tb-clientes"></div>
+        </div>
+        <div class="panel hidden" id="painel-novo">
+          <div class="panel-head"><h2>Cadastrar cliente</h2></div>
+          <form class="form-grid" id="form-novo">
+            <div><label for="n-nome">Razão social</label><input id="n-nome" required></div>
+            <div><label for="n-cnpj">CNPJ</label><input id="n-cnpj" placeholder="00.000.000/0000-00"></div>
+            <div><label for="n-origem">Origem dos dados</label>
+              <select id="n-origem"><option value="contaazul">Conta Azul</option><option value="planilha">Planilha padrão Patagonia</option><option value="outro">Outro ERP (planilha padrão)</option></select></div>
+            <div><label for="n-email">E-mail do usuário do cliente</label><input id="n-email" type="email" placeholder="financeiro@cliente.com.br"></div>
+            <div class="full"><label for="n-setor">Setor de atuação</label><input id="n-setor" placeholder="Ex.: Distribuição de materiais elétricos, clínica odontológica, SaaS B2B…"></div>
+            <div class="full"><label for="n-contexto">Contexto da empresa</label><textarea id="n-contexto" placeholder="Conte sobre a empresa: o que vende, para quem, região, porte, sazonalidade, regime tributário, peculiaridades do negócio…"></textarea></div>
+            <div class="full"><button class="btn btn-primary" type="submit">Cadastrar</button>
+              <span class="muted" style="font-size:13px;margin-left:10px">Cria a pasta do cliente no SharePoint e libera o acesso do e-mail informado.</span></div>
+          </form>
+        </div>
+
+        <!-- Ficha do cliente selecionado -->
+        <div class="panel ficha" id="ficha">
+          <div class="ficha-head">
+            <div><h2 id="ficha-nome"></h2><span class="muted" style="font-size:13px" id="ficha-sub"></span></div>
+            <div id="ficha-badges"></div>
+          </div>
+          <div class="subtabs" id="ficha-tabs">
+            <button class="active" data-sub="f-situacao">Situação dos dados</button>
+            <button data-sub="f-acessos">Acessos</button>
+            <button data-sub="f-contexto">Contexto e setor</button>
+            <button data-sub="f-export">Exportar relatórios</button>
+          </div>
+
+          <div class="subview active" id="f-situacao">
+            <div class="kpis" id="sit-kpis"></div>
+            <div class="panel-head"><h2 style="font-size:15px">Fechamento mensal</h2>
+              <div style="display:flex;gap:8px"><button class="btn btn-outline btn-sm" id="btn-fechar-prontos">Fechar meses sem pendências</button><button class="btn btn-primary btn-sm" id="btn-salvar-fech">Salvar fechamentos</button></div></div>
+            <p class="muted" style="font-size:13px;margin-top:-6px">Meses <b>Fechados</b> aparecem como definitivos para o cliente; os demais aparecem como prévia.</p>
+            <div class="mes-grid" id="mes-grid"></div>
+          </div>
+
+          <div class="subview" id="f-acessos">
+            <div id="lista-acessos"></div>
+            <form class="inline" id="form-acesso" style="margin-top:16px">
+              <div><label for="ac-email">E-mail</label><input id="ac-email" type="email" required placeholder="usuario@cliente.com.br"></div>
+              <div><label for="ac-nome">Nome</label><input id="ac-nome" required></div>
+              <label style="display:flex;gap:6px;align-items:center;font-weight:600;flex:0 0 auto"><input type="checkbox" id="ac-convite" checked style="width:auto"> Enviar convite</label>
+              <button class="btn btn-primary" type="submit">Adicionar acesso</button>
+            </form>
+            <p class="muted" style="font-size:13px;margin-top:12px">O login é feito pela Microsoft. A redefinição envia ao usuário um e-mail com o link oficial de recuperação de senha e o endereço do portal.</p>
+          </div>
+
+          <div class="subview" id="f-contexto">
+            <div style="margin-bottom:12px"><label for="cx-setor">Setor de atuação</label><input id="cx-setor"></div>
+            <div style="margin-bottom:12px"><label for="cx-texto">Contexto da empresa</label><textarea id="cx-texto" style="min-height:130px" placeholder="O que a empresa faz, clientes, região, porte, sazonalidade, regime tributário, peculiaridades…"></textarea></div>
+            <button class="btn btn-primary btn-sm" id="btn-salvar-contexto">Salvar contexto</button>
+            <hr style="border:0;border-top:1px solid var(--border);margin:22px 0">
+            <div class="panel-head"><h2 style="font-size:15px">Conceitos e benchmarks do setor</h2>
+              <button class="btn btn-dark btn-sm" id="btn-benchmarks">Pesquisar com o Claude em fontes confiáveis</button></div>
+            <p class="muted" style="font-size:13px;margin-top:-6px">O Claude pesquisa em fontes como IBGE, Banco Central, Sebrae, FGV e entidades setoriais. Revise o texto antes de salvar — ele é usado no assistente e nas apresentações.</p>
+            <textarea id="bm-texto" style="min-height:180px" placeholder="Nenhum benchmark salvo ainda."></textarea>
+            <div class="fontes" id="bm-fontes"></div>
+            <button class="btn btn-primary btn-sm" style="margin-top:10px" id="btn-salvar-bm">Salvar benchmarks</button>
+          </div>
+
+          <div class="subview" id="f-export">
+            <div class="inline" style="margin-bottom:18px">
+              <div><label for="ex-de">De</label><select id="ex-de"></select></div>
+              <div><label for="ex-ate">Até</label><select id="ex-ate"></select></div>
+            </div>
+            <div class="grid-2">
+              <div class="export-card">
+                <h3>Planilha completa (.xlsx)</h3>
+                <p class="muted" style="font-size:14px">Capa, KPIs, DRE, DFC, Fluxo de Caixa, Projeções, Comercial, situação dos fechamentos e as bases de dados utilizadas (lançamentos, vendas, plano de contas) do período — formatada e pronta para enviar.</p>
+                <button class="btn btn-primary btn-sm" id="btn-exp-xlsx">Gerar planilha</button>
+              </div>
+              <div class="export-card">
+                <h3>Apresentação de resultados</h3>
+                <p class="muted" style="font-size:14px">Slides com contexto, destaques, DRE, custos e despesas, caixa, comercial, benchmarks do setor e conclusões.</p>
+                <label style="display:flex;gap:6px;align-items:center;font-weight:600;font-size:14px"><input type="checkbox" id="ex-ia" checked style="width:auto"> Conclusões escritas pelo Claude</label>
+                <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+                  <button class="btn btn-primary btn-sm" id="btn-exp-pptx">Gerar PowerPoint</button>
+                  <button class="btn btn-outline btn-sm" id="btn-exp-pdf">Gerar PDF</button>
+                </div>
+              </div>
+            </div>
+            <div class="log" id="log-export" style="margin-top:16px">Selecione o período e o formato.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ IMPORTAR ============ -->
+      <section class="view" id="view-importar">
+        <div class="panel" id="painel-ca">
+          <div class="panel-head"><h2>Integração Conta Azul</h2><span class="badge badge-info">API Conta Azul</span></div>
+          <div class="ca-status" id="ca-status">Verificando conexão…</div>
+          <div class="inline" id="ca-sync" style="margin-bottom:6px">
+            <div><label for="ca-de">Competência de</label><input type="month" id="ca-de"></div>
+            <div><label for="ca-ate">até</label><input type="month" id="ca-ate"></div>
+            <button class="btn btn-primary" id="btn-ca-sync">Buscar lançamentos e vendas</button>
+          </div>
+          <p class="muted" style="font-size:13px;margin:8px 0 0">Os dados buscados passam pela mesma validação e prévia abaixo antes de serem publicados. Sem integração? Use a exportação do <b>Extrato de movimentações</b> do Conta Azul no passo 1.</p>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>1. Origem e arquivo</h2><span class="badge badge-info" id="origem-badge"></span></div>
+          <div class="form-grid" style="margin-bottom:14px">
+            <div><label for="imp-origem">Formato do arquivo</label>
+              <select id="imp-origem">
+                <option value="padrao">Planilha padrão Patagonia (todas as abas)</option>
+                <option value="ca-fin">Conta Azul — Extrato de movimentações (modelo padrão Conta Azul)</option>
+                <option value="ca-fin-rec">Conta Azul — Contas a receber (exportação)</option>
+                <option value="ca-fin-pag">Conta Azul — Contas a pagar (exportação)</option>
+                <option value="ca-vendas">Conta Azul — Relatório de vendas</option>
+              </select></div>
+            <div><label for="imp-modo">Como aplicar</label>
+              <select id="imp-modo">
+                <option value="meses">Substituir somente os meses presentes no arquivo</option>
+                <option value="tudo">Substituir toda a base</option>
+              </select></div>
+            <div id="campo-tipo-item" class="hidden"><label for="imp-tipoitem">Tipo padrão dos itens (se o arquivo não informar)</label>
+              <select id="imp-tipoitem"><option>Produto</option><option>Serviço</option></select></div>
+          </div>
+          <label class="dropzone" id="drop">
+            <input type="file" id="arquivo" accept=".xlsx,.xls,.csv" hidden>
+            <b>Arraste a planilha aqui</b> ou clique para selecionar<br><span class="muted" style="font-size:13px">.xlsx, .xls ou .csv</span>
+          </label>
+        </div>
+
+        <div class="panel hidden" id="painel-validacao">
+          <div class="panel-head"><h2>2. Validação</h2><div id="resumo-validacao"></div></div>
+          <div id="validacao"></div>
+          <div id="pendencias-plano"></div>
+        </div>
+
+        <div class="panel hidden" id="painel-preview">
+          <div class="panel-head"><h2>3. Prévia da DRE após a importação</h2></div>
+          <div id="preview-dre"></div>
+          <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap">
+            <button class="btn btn-primary" id="btn-publicar">Publicar para o cliente</button>
+            <button class="btn btn-outline" id="btn-ver-portal">Ver portal do cliente</button>
+            <label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:600"><input type="checkbox" id="chk-bruto" checked style="width:auto"> Arquivar arquivo original no SharePoint</label>
+          </div>
+        </div>
+
+        <div class="panel"><div class="panel-head"><h2>Registro</h2></div><div class="log" id="log">Aguardando arquivo…</div></div>
+      </section>
+
+      <!-- ============ PLANO DE CONTAS ============ -->
+      <section class="view" id="view-plano">
+        <div class="panel">
+          <div class="panel-head"><h2>Carregar plano de contas por planilha</h2></div>
+          <p class="muted" style="font-size:14px;margin-top:-6px">Use a planilha padrão: uma linha por conta, com <b>Número da Conta</b>, <b>Nome da Conta</b>, <b>Tipo da Conta</b> (Sintética ou Analítica) e, para as analíticas, a <b>Referência na Estrutura da DRE</b> e a <b>Referência na Estrutura do DFC</b> — escolhidas em listas com as linhas das estruturas padrão.</p>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-outline" id="btn-plano-modelo">Baixar planilha padrão (em branco)</button>
+            <button class="btn btn-outline" id="btn-plano-atual">Baixar plano atual do cliente</button>
+            <label class="btn btn-primary" style="margin:0">Carregar planilha preenchida<input type="file" id="plano-arquivo" accept=".xlsx,.xls,.csv" hidden></label>
+          </div>
+          <div id="plano-validacao" style="margin-top:16px"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Plano de contas do cliente</h2>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <select id="plano-filtro" style="width:auto"><option value="">Todas as contas</option><option value="pend">Analíticas sem referência</option><option value="uso">Contas com lançamentos</option></select>
+              <button class="btn btn-outline btn-sm" id="btn-add-cat">+ Conta</button><button class="btn btn-primary btn-sm" id="btn-salvar-plano">Salvar e publicar</button></div></div>
+          <p class="muted" style="font-size:14px;margin-top:-6px">Cada conta analítica é alocada em uma linha da estrutura padrão da DRE e do DFC — é isso que padroniza os relatórios de todos os clientes.</p>
+          <div id="tb-plano"></div>
+        </div>
+
+        <div class="panel-grid-2">
+          <div class="panel"><div class="panel-head"><h2>Estrutura padrão — DRE</h2></div><div id="estr-dre"></div></div>
+          <div class="panel"><div class="panel-head"><h2>Estrutura padrão — DFC</h2></div><div id="estr-dfc"></div></div>
+        </div>
+      </section>
+
+      <!-- ============ MODELOS ============ -->
+      <section class="view" id="view-modelos">
+        <div class="grid-2">
+          <div class="card template-card">
+            <div class="icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 9v12"/></svg></div>
+            <div><h3>Planilha padrão de coleta (em branco)</h3>
+              <p class="muted">Para clientes sem Conta Azul. Contém as abas Lançamentos, Plano de Contas, Contas, Vendas e Projeções, com instruções e listas de valores válidos.</p>
+              <button class="btn btn-primary btn-sm" id="dl-modelo">Baixar modelo .xlsx</button></div>
+          </div>
+          <div class="card template-card">
+            <div class="icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 12l3 3 5-6"/></svg></div>
+            <div><h3>Base atual do cliente</h3>
+              <p class="muted">Baixa a base publicada do cliente selecionado já no formato padrão — ideal para revisar, corrigir e reimportar.</p>
+              <button class="btn btn-outline btn-sm" id="dl-base">Baixar base do cliente</button></div>
+          </div>
+          <div class="card template-card">
+            <div class="icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg></div>
+            <div><h3>Modelo com exemplo preenchido</h3>
+              <p class="muted">Mesmo layout, com dados fictícios, para treinar a equipe ou enviar ao cliente como referência.</p>
+              <button class="btn btn-outline btn-sm" id="dl-exemplo">Baixar exemplo</button></div>
+          </div>
+          <div class="card">
+            <h3>Clientes Conta Azul</h3>
+            <p class="muted" style="margin-bottom:8px">Exporte do Conta Azul e importe direto, sem redigitar:</p>
+            <ul>
+              <li><b>Financeiro → Extrato de movimentações</b> (ou Contas a pagar/receber) → Exportar Excel → formato <i>Conta Azul — Extrato</i>.</li>
+              <li><b>Vendas → Relatório de vendas</b> → Exportar Excel → formato <i>Conta Azul — Relatório de vendas</i>.</li>
+              <li>As colunas são reconhecidas pelo nome (ex.: “Data de competência”, “Categoria”, “Valor”, “Data do pagamento”).</li>
+            </ul>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:20px"><div class="panel-head"><h2>Dicionário de dados do modelo padrão</h2><span class="badge badge-info" id="versao-modelo"></span></div><div id="dicionario"></div></div>
+      </section>
+
+      <!-- ============ SHAREPOINT ============ -->
+      <section class="view" id="view-sharepoint">
+        <div class="panel-grid">
+          <div class="panel"><div class="panel-head"><h2>Arquivos do cliente</h2><button class="btn btn-outline btn-sm" id="btn-atualizar-docs">Atualizar</button></div><div id="docs"></div></div>
+          <div class="panel">
+            <div class="panel-head"><h2>Enviar arquivo</h2></div>
+            <form id="form-upload">
+              <div style="margin-bottom:12px"><label for="up-pasta">Pasta</label>
+                <select id="up-pasta"><option value="relatorios">Relatórios (visível ao cliente)</option><option value="bruto">Dados brutos</option><option value="contratos">Contratos</option></select></div>
+              <div style="margin-bottom:12px"><label for="up-arquivo">Arquivo</label><input type="file" id="up-arquivo" required></div>
+              <button class="btn btn-primary" type="submit">Enviar ao SharePoint</button>
+            </form>
+            <p class="muted" style="font-size:13px;margin-top:14px">Estrutura: <code>Clientes/&lt;cliente&gt;/{bruto, publicado, relatorios, contratos}</code></p>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ASSISTENTE ============ -->
+      <section class="view" id="view-assistente">
+        <div class="panel" id="chat"></div>
+      </section>
+
+      <!-- ============ EQUIPE DE CONSULTORES ============ -->
+      <section class="view" id="view-equipe">
+        <div class="panel">
+          <div class="panel-head"><h2>Consultores com acesso à área do consultor</h2><span class="badge badge-info" id="equipe-total"></span></div>
+          <p class="muted" style="font-size:14px;margin-top:-6px">Consultores veem e editam os dados de todos os clientes. Libere este acesso apenas para a equipe da Patagonia Business.</p>
+          <div id="lista-equipe"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Novo consultor</h2></div>
+          <form class="inline" id="form-equipe">
+            <div><label for="eq-nome">Nome</label><input id="eq-nome" required></div>
+            <div><label for="eq-email">E-mail</label><input id="eq-email" type="email" required placeholder="nome@patagoniaconsultoria.com.br"></div>
+            <label style="display:flex;gap:6px;align-items:center;font-weight:500;flex:0 0 auto"><input type="checkbox" id="eq-convite" checked style="width:auto"> Enviar convite por e-mail</label>
+            <button class="btn btn-primary" type="submit">Criar acesso</button>
+          </form>
+          <p class="muted" style="font-size:13px;margin-top:12px">O login é feito com a conta Microsoft do consultor. A recuperação de senha envia por e-mail os links oficiais de troca de senha da Microsoft; o portal nunca recebe nem guarda senhas.</p>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/estrutura.js"></script>
+<script src="../assets/js/core.js"></script>
+<script src="../assets/js/demo.js"></script>
+<script src="../assets/js/analise.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/importacao.js"></script>
+<script src="../assets/js/exportar.js"></script>
+<script src="../assets/js/consultor.js"></script>
+</body>
+</html>

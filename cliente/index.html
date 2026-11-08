@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portal do Cliente | Patagonia Business</title>
+  <link rel="icon" href="../assets/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="../assets/img/favicon.png">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,500&family=Poppins:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <a class="brand" href="../index.html" aria-label="Patagonia Business"><span class="logo logo-branco"></span><small>Portal do cliente</small></a>
+
+    <button class="side-link" data-view="geral"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="10" y="2" width="6" height="6" rx="1"/><rect x="2" y="10" width="6" height="6" rx="1"/><rect x="10" y="10" width="6" height="6" rx="1"/></svg>Visão geral</button>
+
+    <div class="side-group">Financeiro</div>
+    <button class="side-link" data-view="financeiro"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 15h12M5 12V7m4 5V3m4 9V9"/></svg>Relatórios financeiros</button>
+
+    <div class="side-group">Comercial</div>
+    <button class="side-link" data-view="comercial"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 13l5-5 3 3 6-6"/><path d="M12 5h4v4"/></svg>Vendas e clientes</button>
+
+    <div class="side-group">Recursos</div>
+    <button class="side-link" data-view="documentos"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 2h7l4 4v10H4z"/><path d="M11 2v4h4"/></svg>Documentos</button>
+    <button class="side-link" data-view="assistente"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h12v8H8l-4 3v-3H3z"/></svg>Assistente IA</button>
+
+    <div class="side-foot"></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div style="display:flex;align-items:center;gap:12px">
+        <button class="menu-btn" aria-label="Menu">☰</button>
+        <div><h1 id="titulo">Visão geral</h1><span class="muted" style="font-size:13px" id="empresa-nome"></span></div>
+      </div>
+      <div class="filters">
+        <select id="sel-cliente" class="hidden" aria-label="Cliente"></select>
+        <select id="sel-periodo" aria-label="Período">
+          <option value="3">Últimos 3 meses</option>
+          <option value="6">Últimos 6 meses</option>
+          <option value="12" selected>Últimos 12 meses</option>
+          <option value="ano">Ano corrente</option>
+        </select>
+        <span class="badge badge-info" id="atualizado"></span>
+      </div>
+    </header>
+
+    <div class="content">
+      <div id="erro"></div>
+
+      <!-- ============ VISÃO GERAL ============ -->
+      <section class="view" id="view-geral">
+        <h2 class="sec-title">KPIs Financeiros — Competência <span id="per-comp"></span></h2>
+        <div class="kpis" id="kpis-comp"></div>
+        <div class="panel"><div class="panel-head"><h2>Faturamento, EBITDA e resultado líquido</h2></div><div class="chart-box sm"><canvas id="ch-geral-res"></canvas></div></div>
+        <div class="panel">
+          <div class="panel-head"><h2>Composição das despesas</h2><span class="muted" style="font-size:13px" id="tot-desp"></span></div>
+          <div class="chart-pair"><div class="chart-box"><canvas id="ch-desp-pizza"></canvas></div><div class="chart-box"><canvas id="ch-desp-barras"></canvas></div></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Composição dos custos</h2><span class="muted" style="font-size:13px" id="tot-cus"></span></div>
+          <div class="chart-pair"><div class="chart-box"><canvas id="ch-cus-pizza"></canvas></div><div class="chart-box"><canvas id="ch-cus-barras"></canvas></div></div>
+        </div>
+
+        <h2 class="sec-title" style="margin-top:28px">KPIs Financeiros — Caixa <span id="per-caixa"></span></h2>
+        <div class="kpis" id="kpis-caixa"></div>
+        <div class="panel-grid-2">
+          <div class="panel"><div class="panel-head"><h2>Saldo do caixa — realizado × previsto</h2></div><div class="chart-box"><canvas id="ch-geral-caixa"></canvas></div></div>
+          <div class="panel"><div class="panel-head"><h2>Geração / queima de caixa</h2><span class="muted" style="font-size:13px">Fluxo de caixa livre (DFC)</span></div><div class="chart-box"><canvas id="ch-geral-fcl"></canvas></div></div>
+        </div>
+      </section>
+
+      <!-- ============ FINANCEIRO ============ -->
+      <section class="view" id="view-financeiro">
+        <div class="subtabs">
+          <button class="active" data-sub="sub-dre">DRE</button>
+          <button data-sub="sub-dfc">DFC</button>
+          <button data-sub="sub-fluxo">Fluxo de Caixa</button>
+          <button data-sub="sub-proj">Projeções</button>
+        </div>
+
+        <div class="subview active" id="sub-dre">
+          <div id="rs-dre"></div>
+          <div class="kpis" id="kpis-dre"></div>
+          <div class="panel">
+            <div class="panel-head"><h2>Demonstrativo de Resultado do Exercício (DRE)</h2>
+              <div style="display:flex;gap:8px"><label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:600"><input type="checkbox" id="dre-detalhe" style="width:auto"> Detalhar contas analíticas</label>
+              <button class="btn btn-outline btn-sm" id="exp-dre">Exportar Excel</button></div>
+            </div>
+            <div id="tb-dre"></div>
+          </div>
+          <div class="panel"><div class="panel-head"><h2>Margens</h2></div><div class="chart-box sm"><canvas id="ch-margens"></canvas></div></div>
+        </div>
+
+        <div class="subview" id="sub-dfc">
+          <div id="rs-dfc"></div>
+          <div class="panel"><div class="panel-head"><h2>Geração de caixa por atividade</h2></div><div class="chart-box sm"><canvas id="ch-dfc"></canvas></div></div>
+          <div class="panel"><div class="panel-head"><h2>Demonstrativo de Fluxo de Caixa (DFC)</h2>
+            <div style="display:flex;gap:8px"><label style="display:flex;gap:6px;align-items:center;margin:0;font-weight:600"><input type="checkbox" id="dfc-detalhe" style="width:auto"> Detalhar contas analíticas</label>
+            <button class="btn btn-outline btn-sm" id="exp-dfc">Exportar Excel</button></div></div><div id="tb-dfc"></div></div>
+        </div>
+
+        <div class="subview" id="sub-fluxo">
+          <div id="rs-fluxo"></div>
+          <div class="kpis" id="kpis-fluxo"></div>
+          <div class="panel"><div class="panel-head"><h2>Entradas, saídas e saldo</h2><span class="muted" style="font-size:13px">Barras claras = previsto</span></div><div class="chart-box"><canvas id="ch-fluxo"></canvas></div></div>
+          <div class="panel"><div class="panel-head"><h2>Fluxo de caixa mensal</h2><button class="btn btn-outline btn-sm" id="exp-fluxo">Exportar Excel</button></div><div id="tb-fluxo"></div></div>
+        </div>
+
+        <div class="subview" id="sub-proj">
+          <div id="rs-proj"></div>
+          <div class="panel">
+            <div class="panel-head"><h2>Projeção de resultado</h2>
+              <select id="sel-cenario" style="width:auto"><option>Base</option><option>Otimista</option><option>Conservador</option></select></div>
+            <div class="chart-box"><canvas id="ch-proj"></canvas></div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head"><h2>Simular premissas com a IA</h2><span class="muted" style="font-size:13px">Converse para ajustar as premissas — a projeção é recalculada na hora</span></div>
+            <div class="sim-grid">
+              <div class="sim-chat" id="sim-chat"></div>
+              <div>
+                <h3 style="font-size:15px">Premissas da simulação</h3>
+                <ul class="premissas" id="sim-premissas"></ul>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <button class="btn btn-outline btn-sm" id="sim-reset">Restaurar padrão</button>
+                  <button class="btn btn-primary btn-sm hidden" id="sim-publicar">Publicar como cenário Base</button>
+                </div>
+              </div>
+            </div>
+            <div class="chart-box" style="margin-top:18px"><canvas id="ch-sim"></canvas></div>
+            <div id="tb-sim" style="margin-top:14px"></div>
+          </div>
+
+          <div class="panel"><div class="panel-head"><h2>Projeção publicada pelo consultor</h2></div><div id="tb-proj"></div></div>
+        </div>
+      </section>
+
+      <!-- ============ COMERCIAL ============ -->
+      <section class="view" id="view-comercial">
+        <div id="rs-com"></div>
+        <div class="kpis" id="kpis-com"></div>
+        <div class="subtabs">
+          <button class="active" data-sub="sub-vol">Volume de vendas</button>
+          <button data-sub="sub-cli">Clientes</button>
+          <button data-sub="sub-prod">Produtos e serviços</button>
+          <button data-sub="sub-vend">Vendedores e regiões</button>
+        </div>
+        <div class="subview active" id="sub-vol">
+          <div class="panel"><div class="panel-head"><h2>Faturamento e pedidos por mês</h2></div><div class="chart-box"><canvas id="ch-vol"></canvas></div></div>
+          <div class="panel"><div class="panel-head"><h2>Indicadores mensais</h2><button class="btn btn-outline btn-sm" id="exp-com">Exportar Excel</button></div><div id="tb-vol"></div></div>
+        </div>
+        <div class="subview" id="sub-cli">
+          <div class="panel-grid">
+            <div class="panel"><div class="panel-head"><h2>Curva ABC de clientes</h2></div><div id="tb-cli"></div></div>
+            <div class="panel"><div class="panel-head"><h2>Clientes ativos × novos</h2></div><div class="chart-box"><canvas id="ch-cli"></canvas></div></div>
+          </div>
+        </div>
+        <div class="subview" id="sub-prod">
+          <div class="panel-grid">
+            <div class="panel"><div class="panel-head"><h2>Produtos e serviços comercializados</h2></div><div id="tb-prod"></div></div>
+            <div class="panel"><div class="panel-head"><h2>Por linha / categoria</h2></div><div class="chart-box"><canvas id="ch-cat"></canvas></div></div>
+          </div>
+        </div>
+        <div class="subview" id="sub-vend">
+          <div class="panel-grid-2">
+            <div class="panel"><div class="panel-head"><h2>Por vendedor</h2></div><div id="tb-vend"></div></div>
+            <div class="panel"><div class="panel-head"><h2>Por região</h2></div><div id="tb-reg"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ DOCUMENTOS ============ -->
+      <section class="view" id="view-documentos">
+        <div class="panel"><div class="panel-head"><h2>Relatórios e arquivos</h2><span class="muted" style="font-size:13px">Repositório SharePoint da Patagonia Business</span></div><div id="docs"></div></div>
+      </section>
+
+      <!-- ============ ASSISTENTE ============ -->
+      <section class="view" id="view-assistente">
+        <div class="panel" id="chat"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="../assets/js/config.js"></script>
+<script src="../assets/js/estrutura.js"></script>
+<script src="../assets/js/core.js"></script>
+<script src="../assets/js/demo.js"></script>
+<script src="../assets/js/analise.js"></script>
+<script src="../assets/js/ui.js"></script>
+<script src="../assets/js/cliente.js"></script>
+</body>
+</html>
