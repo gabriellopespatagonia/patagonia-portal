@@ -90,15 +90,24 @@
       pop.classList.toggle("hidden");
       if (abrir) { iniSel = de; fimSel = ate; ano = +(ate || ultimo()).slice(0, 4); desenhar(); }
     });
+    // cliques dentro do calendário não podem chegar ao "clicou fora, fecha" (o mês clicado é redesenhado e sai do DOM)
+    pop.addEventListener("click", (e) => e.stopPropagation());
+    let ultimoClique = { m: null, t: 0 }; // clique duplo no mesmo mês = aplica só esse mês
     pop.addEventListener("click", (e) => {
       const b = e.target.closest("button"); if (!b) return;
       if (b.dataset.p != null) { const [a, z] = presets[+b.dataset.p][1](); return aplicar(a, z); }
       if (b.dataset.a) { ano += +b.dataset.a; return desenhar(); }
-      if (b.dataset.m) { if (!iniSel || fimSel) { iniSel = b.dataset.m; fimSel = null; } else fimSel = b.dataset.m; return desenhar(); }
+      if (b.dataset.m) {
+        const m = b.dataset.m, agora = Date.now();
+        if (ultimoClique.m === m && agora - ultimoClique.t < 500) { ultimoClique = { m: null, t: 0 }; return aplicar(m, m); }
+        ultimoClique = { m, t: agora };
+        if (!iniSel || fimSel) { iniSel = m; fimSel = null; } else fimSel = m;
+        return desenhar();
+      }
       if (b.dataset.x === "cancelar") return pop.classList.add("hidden");
       if (b.dataset.x === "aplicar" && iniSel) return aplicar(iniSel, fimSel || iniSel);
     });
-    document.addEventListener("click", (e) => { if (!el.contains(e.target)) pop.classList.add("hidden"); });
+    document.addEventListener("click", (e) => { if (e.target.isConnected && !el.contains(e.target)) pop.classList.add("hidden"); });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") pop.classList.add("hidden"); });
     const api = {
       /** Informa os meses com dados; mantém a escolha se ainda fizer sentido, senão usa os últimos 12 meses. */
