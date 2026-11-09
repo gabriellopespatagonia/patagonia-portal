@@ -146,9 +146,9 @@
           <div class="inline" id="ca-sync" style="margin-bottom:6px">
             <div><label for="ca-de">Competência de</label><input type="month" id="ca-de"></div>
             <div><label for="ca-ate">até</label><input type="month" id="ca-ate"></div>
-            <button class="btn btn-primary" id="btn-ca-sync">Buscar lançamentos e vendas</button>
+            <button class="btn btn-primary" id="btn-ca-sync">Buscar extrato completo</button>
           </div>
-          <p class="muted" style="font-size:13px;margin:8px 0 0">Os dados buscados passam pela mesma validação e prévia abaixo antes de serem publicados. Sem integração? Use a exportação do <b>Extrato de movimentações</b> do Conta Azul no passo 1.</p>
+          <p class="muted" style="font-size:13px;margin:8px 0 0">Busca todas as parcelas com competência no período e todos os pagamentos desde o início dele, com data de caixa, conta bancária, rateio por categoria e centro de custo, juros, descontos, saldos das contas e itens das vendas. Os dados passam pela mesma validação e prévia abaixo antes de serem publicados. Sem integração? Use a exportação do <b>Extrato de movimentações</b> do Conta Azul no passo 1.</p>
         </div>
 
         <div class="panel">
@@ -166,6 +166,7 @@
               <select id="imp-modo">
                 <option value="meses">Substituir somente os meses presentes no arquivo</option>
                 <option value="tudo">Substituir toda a base</option>
+                <option value="contaazul">Sincronização Conta Azul (competências do período + pagamentos desde o início)</option>
               </select></div>
             <div id="campo-tipo-item" class="hidden"><label for="imp-tipoitem">Tipo padrão dos itens (se o arquivo não informar)</label>
               <select id="imp-tipoitem"><option>Produto</option><option>Serviço</option></select></div>

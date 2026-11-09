@@ -10,7 +10,7 @@
 
   const $ = (id) => document.getElementById(id);
   const log = (msg) => { const el = $("log"); el.textContent = (el.textContent === "Aguardando arquivo…" ? "" : el.textContent + "\n") + `[${new Date().toLocaleTimeString("pt-BR")}] ${msg}`; el.scrollTop = el.scrollHeight; };
-  let clientes = [], clienteId = null, base = null, pendente = null, arquivoAtual = null;
+  let clientes = [], clienteId = null, base = null, pendente = null, arquivoAtual = null, periodoCA = null;
 
   async function carregarClientes() {
     clientes = await PB.api.get("/clientes");
@@ -108,7 +108,8 @@
       const qtd = Object.entries(r.parcial).map(([k, v]) => `${k}: ${v.length}`).join(" | ");
       log(qtd ? "Registros lidos → " + qtd : "Nenhum registro reconhecido.");
       if (!qtd) return;
-      pendente = r.parcial;
+      pendente = r.parcial; periodoCA = null;
+      if ($("imp-modo").value === "contaazul") $("imp-modo").value = "meses";
       validarEExibir();
     } catch (e) { log("ERRO: " + e.message); }
     inp.value = "";
@@ -142,7 +143,7 @@
       });
     } else $("pendencias-plano").innerHTML = "";
     // prévia
-    const previa = IMP.mesclar(base, pendente, $("imp-modo").value);
+    const previa = IMP.mesclar(base, pendente, $("imp-modo").value, periodoCA);
     const meses = PB.mesesDisponiveis(previa).slice(-6);
     $("painel-preview").classList.remove("hidden");
     if (meses.length) { const dre = PB.calc.dre(previa, meses); UI.tabelaDemonstrativo($("preview-dre"), meses, dre.linhas.filter((l) => l.tipo !== "conta" && l.tipo !== "linha")); }
@@ -152,7 +153,7 @@
   $("imp-modo").addEventListener("change", () => pendente && validarEExibir());
 
   $("btn-publicar").addEventListener("click", async () => {
-    const novo = IMP.mesclar(base, pendente, $("imp-modo").value);
+    const novo = IMP.mesclar(base, pendente, $("imp-modo").value, periodoCA);
     $("btn-publicar").disabled = true;
     try {
       if ($("chk-bruto").checked && arquivoAtual) {
@@ -161,7 +162,7 @@
       }
       log("Publicando base padronizada…");
       await PB.api.post("/dados", { clienteId, dados: novo });
-      base = novo; pendente = null;
+      base = novo; pendente = null; periodoCA = null;
       log(`Publicado em ${new Date().toLocaleString("pt-BR")}. O cliente já vê os relatórios atualizados.`);
       $("painel-validacao").classList.add("hidden"); $("painel-preview").classList.add("hidden");
       await carregarClientes();
@@ -312,9 +313,9 @@
   /* ---------- Situação dos dados e fechamento ---------- */
   function diagnosticoMes(m) {
     const L = base.lancamentos.filter((l) => l.competencia === m);
-    const real = L.filter((l) => l.status === "Realizado");
+    const real = L.filter((l) => l.status === "Realizado" || l.status === "Em aberto");
     const hoje = new Date().toISOString().slice(0, 10);
-    const vencidos = L.filter((l) => l.status === "Previsto" && l.data < hoje);
+    const vencidos = L.filter((l) => l.status !== "Realizado" && l.data < hoje);
     const semPlano = new Set(real.filter((l) => { const c = PB.contaDe(base, l.categoria); return !c || !c.refDRE || !c.refDFC; }).map((l) => l.categoria));
     const vendas = base.vendas.filter((v) => v.data.startsWith(m));
     const receita = PB.soma(real.filter((l) => l.tipo === "Receita"), (l) => l.valor);
@@ -489,14 +490,36 @@
   $("btn-ca-sync").addEventListener("click", async (e) => {
     const de = $("ca-de").value, ate = $("ca-ate").value;
     if (!de || !ate || de > ate) return alert("Período inválido.");
-    e.target.disabled = true; log(`Buscando dados no Conta Azul de ${f.mes(de)} a ${f.mes(ate)}…`);
+    const btn = e.target; btn.disabled = true;
+    log(`Buscando no Conta Azul: competências de ${f.mes(de)} a ${f.mes(ate)} e todos os pagamentos desde ${f.mes(de)}…`);
     try {
-      const r = await PB.api.post("/contaazul/sincronizar", { clienteId, de, ate });
-      (r.avisos || []).forEach((a) => log("• " + a));
-      log(`Registros recebidos → lançamentos: ${r.parcial.lancamentos?.length || 0} | vendas: ${r.parcial.vendas?.length || 0}`);
-      $("imp-modo").value = "meses"; arquivoAtual = null; pendente = r.parcial; validarEExibir();
+      if (PB.isDemo()) {
+        const r = await PB.api.post("/contaazul/sincronizar", { clienteId, de, ate });
+        (r.avisos || []).forEach((a) => log("• " + a));
+        $("imp-modo").value = "meses"; arquivoAtual = null; periodoCA = null; pendente = r.parcial; validarEExibir();
+        btn.disabled = false; return;
+      }
+      // 1) lista de parcelas, contas, transferências e vendas
+      const lista = await PB.api.post("/contaazul/sincronizar", { clienteId, de, ate, etapa: "lista" });
+      (lista.avisos || []).forEach((a) => log("• " + a));
+      // 2) detalhes: baixas (data de caixa e conta) de tudo que teve pagamento e rateio das parcelas com mais de uma categoria
+      const idsP = lista.parcelas.filter((p) => p.pago > 0 || p.categorias.length > 1 || p.centros.length > 1).map((p) => p.id);
+      const idsV = lista.vendas.filter((v) => !/CANCEL|ORCAMENTO|ORÇAMENTO|RECUSAD|ESPERANDO/i.test(v.situacao)).map((v) => v.id);
+      const det = { parcelas: [], vendas: [], falhas: [], totalFalhas: 0 };
+      const LOTE = 40, total = idsP.length + idsV.length;
+      for (let i = 0; i < total; i += LOTE) {
+        const fatia = [...idsP, ...idsV.map((id) => "v:" + id)].slice(i, i + LOTE);
+        log(`Detalhando pagamentos e itens… ${Math.min(i + LOTE, total)} de ${total}`);
+        const r = await PB.api.post("/contaazul/sincronizar", { clienteId, etapa: "detalhes", parcelas: fatia.filter((x) => !x.startsWith("v:")), vendas: fatia.filter((x) => x.startsWith("v:")).map((x) => x.slice(2)) });
+        det.parcelas.push(...r.parcelas); det.vendas.push(...r.vendas); det.falhas.push(...r.falhas); det.totalFalhas += r.totalFalhas;
+      }
+      // 3) monta o extrato no modelo padrão
+      const m = IMP.montarContaAzulAPI(lista, det);
+      m.avisos.forEach((a) => log("• " + a));
+      periodoCA = { de, ate, ini: lista.periodo.ini };
+      $("imp-modo").value = "contaazul"; arquivoAtual = null; pendente = m.parcial; validarEExibir();
     } catch (err) { log("ERRO: " + err.message); }
-    e.target.disabled = false;
+    btn.disabled = false;
   });
   // retorno do fluxo OAuth (?contaazul=ok|erro)
   const retornoCA = new URLSearchParams(location.search).get("contaazul");

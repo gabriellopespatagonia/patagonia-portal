@@ -48,7 +48,7 @@
           { campo: "categoria", titulo: "Conta Analítica", tipo: "texto", obrigatorio: true, ajuda: "Nome (ou número) de uma conta analítica da aba PlanoContas" },
           { campo: "descricao", titulo: "Descrição", tipo: "texto" },
           { campo: "valor", titulo: "Valor", tipo: "numero", obrigatorio: true, ajuda: "Sempre positivo" },
-          { campo: "status", titulo: "Status", tipo: "lista", opcoes: ["Realizado", "Previsto"], obrigatorio: true },
+          { campo: "status", titulo: "Status", tipo: "lista", opcoes: ["Realizado", "Em aberto", "Previsto"], obrigatorio: true, ajuda: "Realizado = pago/recebido; Em aberto = competência já ocorrida, ainda não pago (entra na DRE); Previsto = projeção futura" },
           { campo: "conta", titulo: "Conta Bancária", tipo: "texto" },
           { campo: "centroCusto", titulo: "Centro de Custo", tipo: "texto" },
           { campo: "contraparte", titulo: "Cliente/Fornecedor", tipo: "texto" }
@@ -216,7 +216,7 @@
     return out;
   };
   PB.mesesDisponiveis = (dados) => {
-    const s = new Set(dados.lancamentos.filter((l) => l.status === "Realizado").map((l) => l.competencia));
+    const s = new Set(dados.lancamentos.filter((l) => l.status === "Realizado" || l.status === "Em aberto").map((l) => l.competencia));
     dados.vendas.forEach((v) => s.add(v.data.slice(0, 7)));
     return [...s].sort();
   };
@@ -228,8 +228,10 @@
   function agrupar(dados, meses, tipo, mesDe) {
     const ref = tipo === "DRE" ? "refDRE" : "refDFC", NAO = tipo === "DRE" ? PB.E.NAO_DRE : PB.E.NAO_DFC;
     const folhas = {}, contas = {}, naoClass = new Set();
+    // DRE (competência): realizado + em aberto (competência ocorrida, pagamento pendente). DFC (caixa): só realizado.
+    const entra = tipo === "DRE" ? (s) => s === "Realizado" || s === "Em aberto" : (s) => s === "Realizado";
     dados.lancamentos.forEach((l) => {
-      if (l.status !== "Realizado") return;
+      if (!entra(l.status)) return;
       const i = meses.indexOf(mesDe(l)); if (i < 0) return;
       const c = PB.contaDe(dados, l.categoria);
       let linha = c && c[ref];
@@ -289,10 +291,13 @@
     const dataIni = dados.contas.reduce((m, c) => (c.dataSaldo < m ? c.dataSaldo : m), "9999");
     const ent = meses.map(() => 0), sai = meses.map(() => 0), entP = meses.map(() => 0), saiP = meses.map(() => 0);
     let antes = 0;
+    const mesAtual = new Date().toISOString().slice(0, 7);
     dados.lancamentos.forEach((l) => {
       const c = PB.contaDe(dados, l.categoria);
       if (c && c.refDFC === PB.E.NAO_DFC) return; // ex.: depreciação — não movimenta caixa
-      const ym = l.data.slice(0, 7); const v = l.tipo === "Receita" ? l.valor : -l.valor;
+      let ym = l.data.slice(0, 7); const v = l.tipo === "Receita" ? l.valor : -l.valor;
+      // a receber/pagar vencido e não quitado não é caixa do passado: entra como previsto no mês atual
+      if (l.status !== "Realizado" && ym < mesAtual) { if (!meses.includes(mesAtual)) return; ym = mesAtual; }
       const i = meses.indexOf(ym);
       if (i < 0) { if (ym < meses[0] && l.data >= dataIni && l.status === "Realizado") antes += v; return; }
       if (l.status === "Realizado") (v > 0 ? ent : sai)[i] += Math.abs(v);

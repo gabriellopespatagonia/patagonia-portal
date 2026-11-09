@@ -2,11 +2,17 @@
 //   GET  /api/contaazul/conectar?cliente=ID   → redireciona para o login do Conta Azul
 //   GET  /api/contaazul/callback              → recebe o código e guarda os tokens no SharePoint
 //   GET  /api/contaazul/status?cliente=ID
-//   POST /api/contaazul/sincronizar { clienteId, de: "AAAA-MM", ate: "AAAA-MM" } → lançamentos e vendas no modelo padrão
+//   POST /api/contaazul/sincronizar           → em duas etapas (o navegador conduz, respeitando o tempo-limite das funções):
+//        { clienteId, de, ate, etapa: "lista" }      → parcelas de contas a receber/pagar (competência no período
+//                                                       OU pagamento desde o início do período), contas financeiras,
+//                                                       transferências e vendas
+//        { clienteId, etapa: "detalhes", parcelas: [ids], vendas: [ids] }
+//                                                    → baixas (data de caixa, conta, juros/multa/desconto/taxa),
+//                                                       rateio por categoria e centro de custo, itens das vendas
 //   POST /api/contaazul/desconectar { clienteId }
 //
-// IMPORTANTE: confirme os endereços e nomes de campos no portal developers.contaazul.com
-// ao criar o aplicativo. Todos podem ser ajustados pelas variáveis CONTAAZUL_* sem mudar o código.
+// Endereços e campos conferidos na especificação OpenAPI oficial (developers.contaazul.com, nov/2026):
+// financial-apis-openapi.yaml e sales-apis-openapi.yaml. Podem ser ajustados pelas variáveis CONTAAZUL_*.
 const crypto = require("crypto");
 const { app } = require("@azure/functions");
 const sp = require("../lib/graph");
@@ -16,15 +22,22 @@ const CFG = () => ({
   clientId: process.env.CONTAAZUL_CLIENT_ID,
   clientSecret: process.env.CONTAAZUL_CLIENT_SECRET,
   redirect: process.env.CONTAAZUL_REDIRECT_URI, // ex.: https://www.patagoniabusiness.com.br/api/contaazul/callback
-  // Conferidos no Portal do Desenvolvedor (nov/2026): a tela de login usa rota com "#"
+  // a tela de login usa rota com "#"
   authUrl: process.env.CONTAAZUL_AUTH_URL || "https://login.contaazul.com/#/oauth/authorize",
   tokenUrl: process.env.CONTAAZUL_TOKEN_URL || "https://api-v2.contaazul.com/oauth/token",
   scope: process.env.CONTAAZUL_SCOPE || "openid profile aws.cognito.signin.user.admin",
-  api: process.env.CONTAAZUL_API_URL || "https://api-v2.contaazul.com",
-  pathReceber: process.env.CONTAAZUL_PATH_RECEBER || "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
-  pathPagar: process.env.CONTAAZUL_PATH_PAGAR || "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
-  pathVendas: process.env.CONTAAZUL_PATH_VENDAS || "/v1/venda/busca"
+  api: process.env.CONTAAZUL_API_URL || "https://api-v2.contaazul.com"
 });
+const P = {
+  receber: "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
+  pagar: "/v1/financeiro/eventos-financeiros/contas-a-pagar/buscar",
+  parcela: (id) => `/v1/financeiro/eventos-financeiros/parcelas/${encodeURIComponent(id)}`,
+  contas: "/v1/conta-financeira",
+  saldoAtual: (id) => `/v1/conta-financeira/${encodeURIComponent(id)}/saldo-atual`,
+  transferencias: "/v1/financeiro/transferencias",
+  vendas: "/v1/venda/busca",
+  itensVenda: (id) => `/v1/venda/${encodeURIComponent(id)}/itens`
+};
 const arqTokens = (id) => `Clientes/${id}/config/contaazul.json`;
 const segredoState = () => process.env.CONTAAZUL_STATE_SECRET || process.env.CONTAAZUL_CLIENT_SECRET || "";
 
@@ -62,52 +75,68 @@ async function tokenValido(clienteId) {
   return novo.access_token;
 }
 
-async function buscarPaginado(token, caminho, params, avisos) {
-  const c = CFG(), itens = [], TAM = 100;
-  for (let pagina = 1; pagina <= 50; pagina++) {
-    const url = `${c.api}${caminho}?${new URLSearchParams({ ...params, pagina, tamanho_pagina: TAM })}`;
+/* ---------- Chamadas à API (limite: 10 por segundo e 600 por minuto por conta conectada) ---------- */
+const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+function query(params) {
+  const q = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => { if (v == null || v === "") return; (Array.isArray(v) ? v : [v]).forEach((x) => q.append(k, x)); });
+  return q.toString();
+}
+async function chamar(token, caminho, params = {}) {
+  const url = `${CFG().api}${caminho}${Object.keys(params).length ? "?" + query(params) : ""}`;
+  for (let tentativa = 0; ; tentativa++) {
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
-    if (r.status === 404) { avisos.push(`Endpoint não encontrado: ${caminho} — confira CONTAAZUL_PATH_* no servidor.`); break; }
-    if (!r.ok) throw new Error(`Conta Azul ${caminho}: ${r.status} ${await r.text()}`);
-    const j = await r.json();
-    const lote = j.itens || j.items || j.data || j.content || (Array.isArray(j) ? j : []);
+    if (r.status === 429 && tentativa < 4) { await espera((Number(r.headers.get("retry-after")) || 1.5 * (tentativa + 1)) * 1000); continue; }
+    if (!r.ok) { const e = new Error(`Conta Azul ${caminho}: ${r.status} ${(await r.text()).slice(0, 300)}`); e.status = r.status; throw e; }
+    return r.status === 204 ? null : r.json();
+  }
+}
+async function paginar(token, caminho, params, tam = 500) {
+  const itens = [];
+  for (let pagina = 1; pagina <= 200; pagina++) {
+    const j = await chamar(token, caminho, { ...params, pagina, tamanho_pagina: tam });
+    const lote = (j && (j.itens || j.items)) || (Array.isArray(j) ? j : []);
     itens.push(...lote);
-    if (lote.length < TAM) break;
+    const total = j && (j.itens_totais ?? j.total_itens);
+    if (lote.length < tam || (total != null && itens.length >= total)) break;
   }
   return itens;
 }
-
-/* ---------- Conversão para o modelo padrão ---------- */
-const pick = (o, ...ks) => { for (const k of ks) { const v = k.split(".").reduce((x, p) => (x == null ? x : x[p]), o); if (v != null && v !== "") return v; } return null; };
-const dia = (v) => (v ? String(v).slice(0, 10) : null);
-const QUITADO = /receb|pag|quit|acquit|liquid|baix|settled|paid/i;
-
-function paraLancamento(x, tipo, i) {
-  const venc = dia(pick(x, "data_vencimento", "vencimento", "due_date"));
-  const pgto = dia(pick(x, "data_pagamento", "data_quitacao", "ultima_baixa.data", "baixas.0.data_pagamento", "payment_date"));
-  const comp = dia(pick(x, "data_competencia", "competencia", "evento.data_competencia")) || venc;
-  const total = Number(pick(x, "total", "valor", "valor_total", "amount") || 0);
-  const naoPago = pick(x, "nao_pago", "saldo", "valor_em_aberto");
-  const status = String(pick(x, "status", "situacao") || "");
-  const realizado = !!pgto || QUITADO.test(status) || (naoPago != null && Number(naoPago) === 0 && total > 0);
-  const cat = pick(x, "categorias.0.nome", "categoria.nome", "categoria", "evento.categorias.0.nome") || "Sem categoria";
-  return {
-    _linha: i + 1, data: realizado ? pgto || venc : venc, competencia: comp ? comp.slice(0, 7) : null, tipo, categoria: cat,
-    descricao: pick(x, "descricao", "evento.descricao", "description") || "", valor: Math.abs(total),
-    status: realizado ? "Realizado" : "Previsto",
-    conta: pick(x, "conta_financeira.nome", "conta.nome") || "", centroCusto: pick(x, "centros_de_custo.0.nome", "centro_custo.nome") || "",
-    contraparte: pick(x, "cliente.nome", "fornecedor.nome", "contato.nome", "pessoa.nome") || ""
-  };
+/** Executa tarefas com no máximo `n` em paralelo, espaçadas para não estourar o limite por segundo. */
+async function emLotes(itens, n, fn) {
+  const out = new Array(itens.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, itens.length) }, async () => {
+    while (i < itens.length) { const k = i++; out[k] = await fn(itens[k]); await espera(120); }
+  }));
+  return out;
 }
-function paraVenda(v, i) {
-  return {
-    _linha: i + 1, data: dia(pick(v, "data", "data_venda", "emissao", "created_at")), numero: String(pick(v, "numero", "id") || ""),
-    cliente: pick(v, "cliente.nome", "cliente", "customer.name") || "(não informado)",
-    item: pick(v, "itens.0.descricao", "itens.0.nome", "descricao") || "Venda", tipoItem: /serv/i.test(String(pick(v, "tipo", "itens.0.tipo") || "")) ? "Serviço" : "Produto",
-    categoriaItem: pick(v, "categoria.nome") || "", quantidade: 1, valorUnitario: Number(pick(v, "total", "valor_total") || 0), desconto: Number(pick(v, "desconto", "discount.value") || 0),
-    valorTotal: Number(pick(v, "total", "valor_total", "total_amount") || 0), vendedor: pick(v, "vendedor.nome") || "", regiao: pick(v, "cliente.cidade", "endereco.cidade") || ""
-  };
-}
+
+/* ---------- Datas ---------- */
+const hojeBR = () => new Date(Date.now() - 3 * 3600e3).toISOString().slice(0, 10);
+const ultimoDia = (ym) => { const [y, m] = ym.split("-").map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
+const somaAnos = (iso, n) => `${Number(iso.slice(0, 4)) + n}${iso.slice(4)}`;
+
+/* ---------- Conversões (somente os campos usados no portal) ---------- */
+const num = (v) => Number(v) || 0;
+const resumoParcela = (x, tipo) => ({
+  id: x.id, tipo, descricao: x.descricao || "", vencimento: x.data_vencimento || null, competencia: x.data_competencia || null,
+  status: x.status_traduzido || x.status || "", total: num(x.total), pago: num(x.pago), naoPago: num(x.nao_pago),
+  categorias: (x.categorias || []).map((c) => c.nome).filter(Boolean),
+  centros: (x.centros_custo || []).map((c) => c.nome).filter(Boolean),
+  contraparte: (x.cliente || x.fornecedor || {}).nome || ""
+});
+const detalheParcela = (d) => ({
+  id: d.id, status: d.status || "", competencia: (d.evento && d.evento.data_competencia) || null,
+  conta: (d.conta_financeira && d.conta_financeira.nome) || "",
+  rateio: ((d.evento && d.evento.rateio) || []).map((r) => ({
+    categoria: r.nome_categoria || "", valor: num(r.valor ?? r.valor_bruto),
+    centros: (r.rateio_centro_custo || []).map((c) => ({ nome: c.nome_centro_custo || "", valor: num(c.valor ?? c.valor_bruto) }))
+  })),
+  baixas: (d.baixas || []).map((b) => {
+    const v = b.valor_composicao || {};
+    return { data: b.data_pagamento, bruto: num(v.valor_bruto), juros: num(v.juros), multa: num(v.multa), desconto: num(v.desconto), taxa: num(v.taxa), liquido: num(v.valor_liquido), conta: (b.conta_financeira && b.conta_financeira.nome) || "" };
+  })
+});
 
 /* ---------- Rotas ---------- */
 app.http("contaazulConectar", {
@@ -162,28 +191,87 @@ app.http("contaazulDesconectar", {
   })
 });
 
+async function etapaLista(token, de, ate) {
+  const avisos = [];
+  const ini = `${de}-01`, fim = ultimoDia(ate), hoje = hojeBR();
+  // A busca exige uma janela de vencimento: usamos uma janela ampla e filtramos por competência e por pagamento.
+  let vde = somaAnos(ini, -3), vate = somaAnos(fim > hoje ? fim : hoje, 3);
+  const buscar = async (caminho, filtro) => {
+    try { return await paginar(token, caminho, { data_vencimento_de: vde, data_vencimento_ate: vate, ...filtro }); }
+    catch (e) {
+      if (e.status !== 400) throw e;
+      vde = somaAnos(ini, -1); vate = somaAnos(fim > hoje ? fim : hoje, 1);
+      avisos.push("O Conta Azul limitou a janela de vencimento a 1 ano antes e depois do período.");
+      return paginar(token, caminho, { data_vencimento_de: vde, data_vencimento_ate: vate, ...filtro });
+    }
+  };
+  const porComp = { data_competencia_de: ini, data_competencia_ate: fim };
+  const porPgto = { data_pagamento_de: ini, data_pagamento_ate: hoje };
+  const recC = await buscar(P.receber, porComp), recP = await buscar(P.receber, porPgto);
+  const pagC = await buscar(P.pagar, porComp), pagP = await buscar(P.pagar, porPgto);
+  const mapa = new Map();
+  recC.concat(recP).forEach((x) => mapa.set(x.id, resumoParcela(x, "Receita")));
+  pagC.concat(pagP).forEach((x) => mapa.set(x.id, resumoParcela(x, "Despesa")));
+
+  // contas financeiras e saldo atual (para reconstruir o saldo no início do período)
+  let contas = [];
+  try {
+    const lista = await paginar(token, P.contas, {}, 100);
+    contas = await emLotes(lista, 4, async (c) => {
+      let saldo = c.saldo_atual;
+      if (saldo == null) { try { const s = await chamar(token, P.saldoAtual(c.id)); saldo = s && (s.saldo_atual ?? s.saldo); } catch { saldo = null; } }
+      return { id: c.id, nome: c.nome || "", banco: c.banco || "", tipo: c.tipo || "", ativo: c.ativo !== false, saldoAtual: saldo == null ? null : num(saldo) };
+    });
+  } catch (e) { avisos.push("Contas financeiras: " + e.message); }
+
+  let transferencias = [];
+  try {
+    transferencias = (await paginar(token, P.transferencias, { data_inicio: ini, data_fim: hoje }, 100)).map((t) => ({
+      data: (t.origem && t.origem.data) || t.data, valor: num(t.valor),
+      origem: (t.origem && t.origem.conta_financeira && t.origem.conta_financeira.nome) || "",
+      destino: (t.destino && t.destino.conta_financeira && t.destino.conta_financeira.nome) || ""
+    }));
+  } catch (e) { avisos.push("Transferências: " + e.message); }
+
+  let vendas = [];
+  try {
+    vendas = (await paginar(token, P.vendas, { data_inicio: ini, data_fim: fim }, 100)).map((v) => ({
+      id: v.id, data: v.data, numero: String(v.numero ?? ""), total: num(v.total), tipo: v.tipo || v.itens || "",
+      situacao: (v.situacao && v.situacao.nome) || "", cliente: (v.cliente && v.cliente.nome) || "", cidade: (v.cliente && (v.cliente.cidade || v.cliente.estado)) || ""
+    }));
+  } catch (e) { avisos.push("Vendas: " + e.message); }
+
+  avisos.unshift(`Conta Azul: ${recC.length + recP.length} parcelas a receber e ${pagC.length + pagP.length} a pagar encontradas (competência no período ou pagamento desde ${ini.split("-").reverse().join("/")}), ${contas.length} contas financeiras, ${transferencias.length} transferências e ${vendas.length} vendas.`);
+  return { periodo: { de, ate, ini, fim, hoje }, parcelas: [...mapa.values()], contas, transferencias, vendas, avisos };
+}
+
+async function etapaDetalhes(token, idsParcelas, idsVendas) {
+  const falhas = [];
+  const parcelas = (await emLotes(idsParcelas, 5, async (id) => {
+    try { return detalheParcela(await chamar(token, P.parcela(id))); } catch (e) { falhas.push(`parcela ${id}: ${e.message}`); return null; }
+  })).filter(Boolean);
+  const vendas = (await emLotes(idsVendas, 5, async (id) => {
+    try {
+      const itens = await paginar(token, P.itensVenda(id), {}, 100);
+      return { id, itens: itens.map((i) => ({ nome: i.nome || i.descricao || "Item", tipo: i.tipo || "", quantidade: num(i.quantidade) || 1, valor: num(i.valor) })) };
+    } catch (e) { falhas.push(`venda ${id}: ${e.message}`); return null; }
+  })).filter(Boolean);
+  return { parcelas, vendas, falhas: falhas.slice(0, 20), totalFalhas: falhas.length };
+}
+
 app.http("contaazulSincronizar", {
   methods: ["POST"], authLevel: "anonymous", route: "contaazul/sincronizar",
   handler: rota(async (req) => {
     await exigirConsultor(req);
-    const { clienteId, de, ate } = await req.json(); await exigirAcessoCliente(req, clienteId);
+    const corpo = await req.json();
+    const { clienteId, etapa } = corpo; await exigirAcessoCliente(req, clienteId);
+    const token = await tokenValido(clienteId);
+    if (etapa === "detalhes") {
+      const ids = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === "string").slice(0, 80) : []);
+      return etapaDetalhes(token, ids(corpo.parcelas), ids(corpo.vendas));
+    }
+    const { de, ate } = corpo;
     if (!/^\d{4}-\d{2}$/.test(de) || !/^\d{4}-\d{2}$/.test(ate) || de > ate) throw httpErro(400, "Período inválido");
-    const token = await tokenValido(clienteId), c = CFG(), avisos = [];
-    const [y, m] = ate.split("-").map(Number);
-    const ini = `${de}-01`, fim = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
-    // vencimentos com folga de 2 meses para capturar pagamentos de competências do período
-    const fimFolga = new Date(Date.UTC(y, m + 2, 0)).toISOString().slice(0, 10);
-    const filtro = { data_vencimento_de: ini, data_vencimento_ate: fimFolga };
-    const [rec, pag, vend] = await Promise.all([
-      buscarPaginado(token, c.pathReceber, filtro, avisos),
-      buscarPaginado(token, c.pathPagar, filtro, avisos),
-      buscarPaginado(token, c.pathVendas, { data_inicio: ini, data_fim: fim }, avisos).catch((e) => { avisos.push("Vendas: " + e.message); return []; })
-    ]);
-    const noPeriodo = (l) => l.competencia && l.competencia >= de && l.competencia <= ate;
-    const lancamentos = [...rec.map((x, i) => paraLancamento(x, "Receita", i)), ...pag.map((x, i) => paraLancamento(x, "Despesa", i + rec.length))].filter(noPeriodo);
-    const vendas = vend.map(paraVenda).filter((v) => v.data && v.data.slice(0, 7) >= de && v.data.slice(0, 7) <= ate);
-    avisos.push(`Conta Azul: ${rec.length} contas a receber, ${pag.length} contas a pagar e ${vend.length} vendas lidas.`);
-    if (vendas.length) avisos.push("As vendas vindas da API trazem o total por venda; para o detalhe por produto/serviço, importe também o Relatório de vendas exportado do Conta Azul.");
-    return { parcial: { lancamentos, ...(vendas.length ? { vendas } : {}) }, avisos };
+    return etapaLista(token, de, ate);
   })
 });
