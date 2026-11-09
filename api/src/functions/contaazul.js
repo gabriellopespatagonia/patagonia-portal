@@ -114,10 +114,13 @@ app.http("contaazulConectar", {
   methods: ["GET"], authLevel: "anonymous", route: "contaazul/conectar",
   handler: async (req) => {
     try {
-      await exigirConsultor(req);
+      const quem = await exigirConsultor(req);
       const id = req.query.get("cliente"); await exigirAcessoCliente(req, id);
       const c = CFG(); if (!c.clientId || !c.redirect) throw httpErro(501, "Integração Conta Azul não configurada no servidor");
-      const url = `${c.authUrl}?${new URLSearchParams({ response_type: "code", client_id: c.clientId, redirect_uri: c.redirect, scope: c.scope, state: assinar({ clienteId: id, ts: Date.now(), n: crypto.randomUUID() }) })}`;
+      // O state assinado identifica cliente e consultor: o retorno não depende do cookie de sessão
+      // (o login pode ter sido feito em outro endereço do site, ex.: azurestaticapps.net).
+      const state = assinar({ clienteId: id, por: quem.email, ts: Date.now(), n: crypto.randomUUID() });
+      const url = `${c.authUrl}?${new URLSearchParams({ response_type: "code", client_id: c.clientId, redirect_uri: c.redirect, scope: c.scope, state })}`;
       return { status: 302, headers: { Location: url } };
     } catch (e) { return { status: e.status || 500, body: e.message }; }
   }
@@ -128,11 +131,11 @@ app.http("contaazulCallback", {
   handler: async (req, context) => {
     let destino = "/consultor/index.html?contaazul=";
     try {
-      await exigirConsultor(req);
       if (req.query.get("error")) throw httpErro(400, req.query.get("error"));
-      const { clienteId } = verificar(req.query.get("state"));
+      const { clienteId, por } = verificar(req.query.get("state"));
+      if (!req.query.get("code")) throw httpErro(400, "O Conta Azul não enviou o código de autorização");
       const tokens = await trocarToken({ grant_type: "authorization_code", code: req.query.get("code"), redirect_uri: CFG().redirect });
-      await sp.gravarJson(arqTokens(clienteId), { ...tokens, conectadoEm: new Date().toISOString() });
+      await sp.gravarJson(arqTokens(clienteId), { ...tokens, conectadoEm: new Date().toISOString(), conectadoPor: por || null });
       destino += "ok#importar";
     } catch (e) { context.error(e); destino += encodeURIComponent(e.message.slice(0, 120)) + "#importar"; }
     return { status: 302, headers: { Location: destino } };
