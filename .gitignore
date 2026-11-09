@@ -15,3 +15,6 @@ desktop.ini
 
 # Arquivos temporários do Office
 ~$*
+
+# Testes locais
+_teste_tmp/

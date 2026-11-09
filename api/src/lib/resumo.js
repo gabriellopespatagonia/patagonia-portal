@@ -8,16 +8,20 @@ function indicePlano(plano) {
   return m;
 }
 
+const naDRE = (l) => (l.visao ? l.visao === "Competência" : l.status === "Realizado" || l.status === "Em aberto");
+const caixaRealizado = (l) => (l.visao ? l.visao === "Caixa" && l.status === "Realizado" : l.status === "Realizado");
+
 /** Calcula DRE ou DFC na estrutura padrão para os meses informados. */
 function estrutura(d, meses, tipo) {
   const idx = indicePlano(d.planoContas), ref = tipo === "DRE" ? "refDRE" : "refDFC", NAO = tipo === "DRE" ? E.NAO_DRE : E.NAO_DFC;
   const folhas = {}, contas = {};
   d.lancamentos.forEach((l) => {
-    // DRE por competência: realizado + em aberto; DFC: somente realizado
-    if (!(l.status === "Realizado" || (tipo === "DRE" && l.status === "Em aberto"))) return;
+    // DRE: visão de competência (ou, sem visão, realizado + em aberto); DFC: caixa realizado
+    if (!(tipo === "DRE" ? naDRE(l) : caixaRealizado(l))) return;
     const m = tipo === "DRE" ? l.competencia : l.data.slice(0, 7);
     const i = meses.indexOf(m); if (i < 0) return;
-    const c = idx.get(E.norm(l.categoria));
+    let c = idx.get(E.norm(l.categoria));
+    if (!c) { const m = /^\s*(\d[\d.]*)\s*[-–]\s*(.+)$/.exec(String(l.categoria || "")); if (m) c = idx.get(E.norm(m[1])) || idx.get(E.norm(m[2])); }
     let linha = c && c[ref];
     if (linha === NAO) return;
     if (!linha) linha = tipo === "DRE" ? (l.tipo === "Receita" ? "Receita Bruta" : "Despesas Administrativas") : (l.tipo === "Receita" ? "Outras Entradas" : "Despesas Administrativas");
@@ -35,7 +39,7 @@ function estrutura(d, meses, tipo) {
 }
 
 function resumir(d, mesesFiltro) {
-  const todos = [...new Set(d.lancamentos.filter((l) => l.status === "Realizado" || l.status === "Em aberto").map((l) => l.competencia))].sort();
+  const todos = [...new Set(d.lancamentos.filter(naDRE).map((l) => l.competencia))].sort();
   const meses = mesesFiltro && mesesFiltro.length ? todos.filter((m) => mesesFiltro.includes(m)) : todos.slice(-12);
   const vendasMes = {}, clientes = {}, itens = {};
   d.vendas.forEach((v) => {
@@ -45,7 +49,7 @@ function resumir(d, mesesFiltro) {
     clientes[v.cliente] = (clientes[v.cliente] || 0) + v.valorTotal; itens[v.item] = (itens[v.item] || 0) + v.valorTotal;
   });
   const top = (o, n = 15) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n).map(([nome, v]) => ({ nome, valor: Math.round(v) }));
-  const previstos = d.lancamentos.filter((l) => l.status !== "Realizado").reduce((o, l) => {
+  const previstos = d.lancamentos.filter((l) => l.visao !== "Competência" && l.status !== "Realizado").reduce((o, l) => {
     const m = l.data.slice(0, 7); (o[m] ||= { entradas: 0, saidas: 0 }); o[m][l.tipo === "Receita" ? "entradas" : "saidas"] += Math.round(l.valor); return o;
   }, {});
   return {

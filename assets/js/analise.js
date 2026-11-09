@@ -152,7 +152,7 @@
     const saidaMedia = soma(real.slice(-3), (l) => l.saidas) / Math.min(3, real.length || 1);
     const menor = prev.reduce((m, l) => (l.saldoFinal < m.saldoFinal ? l : m), prev[0] || real.at(-1));
     const hoje = new Date().toISOString().slice(0, 10);
-    const vencidos = dados.lancamentos.filter((l) => l.status !== "Realizado" && l.data < hoje);
+    const vencidos = dados.lancamentos.filter((l) => PB.caixaPrevisto(l) && l.data < hoje);
     return { titulo: "Resumo do Fluxo de Caixa", obs: [
       `Saldo de caixa atual: ${f.moeda(saldo)}${real.length ? " (" + f.mes(real.at(-1).mes) + ")" : ""}.`,
       saidaMedia ? `Cobertura: o saldo atual paga ${(saldo / saidaMedia).toFixed(1).replace(".", ",")} mês(es) de saídas médias (${f.moeda(saidaMedia)}/mês nos últimos 3 meses).` : null,

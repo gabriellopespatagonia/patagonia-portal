@@ -29,7 +29,7 @@
     }
     const origem = { contaazul: "Conta Azul", planilha: "Planilha padrão", outro: "Outro ERP" }[base.cliente.origem] || base.cliente.origem;
     $("origem-badge").textContent = "Origem do cliente: " + origem;
-    $("imp-origem").value = base.cliente.origem === "contaazul" ? "ca-fin" : "padrao";
+    $("imp-origem").value = "ca-auto";
     $("imp-origem").dispatchEvent(new Event("change"));
   }
 
@@ -99,17 +99,22 @@
       // datas chegam como número serial do Excel e são convertidas sem erro de fuso horário
       const wb = XLSX.read(buf, { type: "array" });
       const fmt = $("imp-origem").value;
-      const r = fmt === "padrao" ? IMP.lerPadrao(wb)
-        : fmt === "ca-fin" ? IMP.lerContaAzulFinanceiro(wb)
-        : fmt === "ca-fin-rec" ? IMP.lerContaAzulFinanceiro(wb, "Receita")
-        : fmt === "ca-fin-pag" ? IMP.lerContaAzulFinanceiro(wb, "Despesa")
+      let r = fmt === "padrao" ? IMP.lerPadrao(wb)
+        : fmt === "ca-auto" ? IMP.lerContaAzulRelatorio(wb)
+        : fmt === "ca-competencia" ? IMP.lerContaAzulCompetencia(wb)
+        : fmt === "ca-extrato" ? IMP.lerContaAzulExtrato(wb)
         : IMP.lerContaAzulVendas(wb, $("imp-tipoitem").value);
+      // formato escolhido não confere com o arquivo: lê pelo tipo detectado
+      if (!Object.keys(r.parcial).length && r.tipoDetectado && (fmt === "ca-competencia" || fmt === "ca-extrato")) {
+        log("• " + r.avisos[0] + " Lendo pelo tipo detectado…");
+        r = IMP.lerContaAzulRelatorio(wb);
+      }
       r.avisos.forEach((a) => log("• " + a));
       const qtd = Object.entries(r.parcial).map(([k, v]) => `${k}: ${v.length}`).join(" | ");
       log(qtd ? "Registros lidos → " + qtd : "Nenhum registro reconhecido.");
       if (!qtd) return;
       pendente = r.parcial; periodoCA = null;
-      if ($("imp-modo").value === "contaazul") $("imp-modo").value = "meses";
+      if ($("imp-modo").value === "contaazul" || r.tipoDetectado) $("imp-modo").value = "meses";
       validarEExibir();
     } catch (e) { log("ERRO: " + e.message); }
     inp.value = "";
@@ -137,16 +142,24 @@
         const plano = pendente.planoContas || (pendente.planoContas = JSON.parse(JSON.stringify(base.planoContas)));
         if (!plano.some((c) => c.numero === "99")) plano.push({ numero: "99", nome: "Contas Importadas a Revisar", tipo: "Sintética", refDRE: "", refDFC: "" });
         let seq = plano.filter((c) => String(c.numero).startsWith("99.")).length;
-        $("pendencias-plano").querySelectorAll("tr[data-cat]").forEach((tr) => plano.push({ numero: `99.${String(++seq).padStart(3, "0")}`, nome: tr.dataset.cat, tipo: "Analítica", refDRE: tr.querySelector(".d").value, refDFC: tr.querySelector(".f").value }));
+        // rótulo do Conta Azul "4.3.06 - Fornec. ..." → conta com o nome (o número fica na descrição do lançamento e casa pelo nome)
+        $("pendencias-plano").querySelectorAll("tr[data-cat]").forEach((tr) => { const m = /^\s*\d[\d.]*\s*[-–]\s*(.+)$/.exec(tr.dataset.cat); plano.push({ numero: `99.${String(++seq).padStart(3, "0")}`, nome: m ? m[1].trim() : tr.dataset.cat, tipo: "Analítica", refDRE: tr.querySelector(".d").value, refDFC: tr.querySelector(".f").value }); });
         log(`${v.semPlano.length} conta(s) analítica(s) criada(s) e alocada(s) na estrutura.`);
         validarEExibir();
       });
     } else $("pendencias-plano").innerHTML = "";
-    // prévia
+    // prévia: DRE (competência) ou DFC (caixa), nos meses do arquivo
     const previa = IMP.mesclar(base, pendente, $("imp-modo").value, periodoCA);
-    const meses = PB.mesesDisponiveis(previa).slice(-6);
+    const L = pendente.lancamentos || [];
+    const soCaixa = L.length && L.every((l) => l.visao === "Caixa");
+    const mesesArq = [...new Set(L.map((l) => (soCaixa ? l.data : l.competencia || l.data || "").slice(0, 7)).filter(Boolean))].sort();
+    const meses = (mesesArq.length ? mesesArq : PB.mesesDisponiveis(previa)).slice(-6);
     $("painel-preview").classList.remove("hidden");
-    if (meses.length) { const dre = PB.calc.dre(previa, meses); UI.tabelaDemonstrativo($("preview-dre"), meses, dre.linhas.filter((l) => l.tipo !== "conta" && l.tipo !== "linha")); }
+    $("painel-preview").querySelector("h2").textContent = soCaixa ? "3. Prévia do DFC (visão de caixa) após a importação" : "3. Prévia da DRE (visão de competência) após a importação";
+    if (meses.length) {
+      const r = soCaixa ? PB.calc.dfc(previa, meses) : PB.calc.dre(previa, meses);
+      UI.tabelaDemonstrativo($("preview-dre"), meses, r.linhas.filter((l) => l.tipo !== "conta"));
+    }
     $("btn-publicar").disabled = v.erros.length > 0;
     $("btn-publicar").title = v.erros.length ? "Corrija os erros antes de publicar" : "";
   }
@@ -280,6 +293,8 @@
         d.colunas.map((c) => `<tr><td><b>${c.titulo}</b></td><td>${c.obrigatorio ? "Sim" : "—"}</td><td>${c.tipo}</td><td style="white-space:normal">${PB.esc(c.ajuda || (c.opcoes ? c.opcoes.join(", ") : ""))}</td></tr>`).join("")}</tbody></table></div>`).join("");
   }
   $("dl-modelo").addEventListener("click", () => IMP.gerarModelo(null, "Patagonia - Modelo Padrao de Coleta.xlsx"));
+  $("dl-modelo-comp").addEventListener("click", () => IMP.gerarModeloContaAzul("competencia", base && base.planoContas).catch((e) => alert(e.message)));
+  $("dl-modelo-ext").addEventListener("click", () => IMP.gerarModeloContaAzul("extrato", base && base.planoContas).catch((e) => alert(e.message)));
   $("dl-base").addEventListener("click", () => IMP.gerarModelo(base, `Base - ${base.cliente.nome}.xlsx`));
   $("dl-exemplo").addEventListener("click", () => {
     const ex = PB.demoGerar("exemplo", "Empresa Exemplo Ltda", "", "planilha", 0.3, 5, 0.5);
@@ -313,9 +328,9 @@
   /* ---------- Situação dos dados e fechamento ---------- */
   function diagnosticoMes(m) {
     const L = base.lancamentos.filter((l) => l.competencia === m);
-    const real = L.filter((l) => l.status === "Realizado" || l.status === "Em aberto");
+    const real = L.filter(PB.naDRE);
     const hoje = new Date().toISOString().slice(0, 10);
-    const vencidos = L.filter((l) => l.status !== "Realizado" && l.data < hoje);
+    const vencidos = base.lancamentos.filter((l) => PB.caixaPrevisto(l) && l.data.startsWith(m) && l.data < hoje);
     const semPlano = new Set(real.filter((l) => { const c = PB.contaDe(base, l.categoria); return !c || !c.refDRE || !c.refDFC; }).map((l) => l.categoria));
     const vendas = base.vendas.filter((v) => v.data.startsWith(m));
     const receita = PB.soma(real.filter((l) => l.tipo === "Receita"), (l) => l.valor);
@@ -491,7 +506,7 @@
     const de = $("ca-de").value, ate = $("ca-ate").value;
     if (!de || !ate || de > ate) return alert("Período inválido.");
     const btn = e.target; btn.disabled = true;
-    log(`Buscando no Conta Azul: competências de ${f.mes(de)} a ${f.mes(ate)} e todos os pagamentos desde ${f.mes(de)}…`);
+    log(`Buscando no Conta Azul de ${f.mes(de)} a ${f.mes(ate)}: visão de competência e extrato de movimentações do período…`);
     try {
       if (PB.isDemo()) {
         const r = await PB.api.post("/contaazul/sincronizar", { clienteId, de, ate });
@@ -507,7 +522,8 @@
       const altP = new Map(lista.parcelas.map((p) => [p.id, p.alteracao])), altV = new Map(lista.vendas.map((v) => [v.id, v.alteracao]));
       const det = { parcelas: [...(lista.cache?.parcelas || [])], vendas: [...(lista.cache?.vendas || [])], falhas: [], totalFalhas: 0 };
       const temP = new Set(det.parcelas.map((d) => d.id)), temV = new Set(det.vendas.map((v) => v.id));
-      const filaP = lista.parcelas.filter((p) => (p.pago > 0 || p.categorias.length > 1 || p.centros.length > 1) && !temP.has(p.id)).map((p) => p.id);
+      // detalhe só quando necessário: baixas de quem teve pagamento no período; rateio de quem tem mais de uma categoria/centro de custo
+      const filaP = lista.parcelas.filter((p) => (p.porPgto || p.categorias.length > 1 || p.centros.length > 1) && !temP.has(p.id)).map((p) => p.id);
       const filaV = lista.vendas.filter((v) => !/CANCEL|ORCAMENTO|ORÇAMENTO|RECUSAD|ESPERANDO/i.test(v.situacao) && !temV.has(v.id)).map((v) => v.id);
       const total = filaP.length + filaV.length; let feitos = 0, lote = 40, falhasSeguidas = 0, novosP = [], novosV = [];
       const dormir = (s) => new Promise((ok) => setTimeout(ok, s * 1000));
@@ -541,8 +557,8 @@
       // 3) monta o extrato no modelo padrão
       const m = IMP.montarContaAzulAPI(lista, det);
       m.avisos.forEach((a) => log("• " + a));
-      periodoCA = { de, ate, ini: lista.periodo.ini };
-      $("imp-modo").value = "contaazul"; arquivoAtual = null; pendente = m.parcial; validarEExibir();
+      periodoCA = null;
+      $("imp-modo").value = "meses"; arquivoAtual = null; pendente = m.parcial; validarEExibir();
     } catch (err) { log("ERRO: " + err.message); }
     btn.disabled = false;
   });

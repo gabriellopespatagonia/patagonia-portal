@@ -51,7 +51,8 @@
           { campo: "status", titulo: "Status", tipo: "lista", opcoes: ["Realizado", "Em aberto", "Previsto"], obrigatorio: true, ajuda: "Realizado = pago/recebido; Em aberto = competência já ocorrida, ainda não pago (entra na DRE); Previsto = projeção futura" },
           { campo: "conta", titulo: "Conta Bancária", tipo: "texto" },
           { campo: "centroCusto", titulo: "Centro de Custo", tipo: "texto" },
-          { campo: "contraparte", titulo: "Cliente/Fornecedor", tipo: "texto" }
+          { campo: "contraparte", titulo: "Cliente/Fornecedor", tipo: "texto" },
+          { campo: "visao", titulo: "Visão", tipo: "lista", opcoes: ["Competência", "Caixa"], ajuda: "Competência = base da DRE (data de competência); Caixa = base do DFC e do Fluxo (data do movimento). Vazio = vale para os dois, conforme o status" }
         ]
       },
       PlanoContas: {
@@ -119,7 +120,19 @@
     idxCache.set(plano, { n: plano.length, m });
     return m;
   };
-  PB.contaDe = (dados, categoria) => PB.indicePlano(dados).get(PB.E.norm(categoria)) || null;
+  // Aceita o nome, o número ou o rótulo do Conta Azul "3.1.01 - Receitas de Vendas" (número e nome)
+  PB.contaDe = (dados, categoria) => {
+    const idx = PB.indicePlano(dados), k = PB.E.norm(categoria);
+    const c = idx.get(k); if (c) return c;
+    const m = /^\s*([\d][\d.]*)\s*[-–]\s*(.+)$/.exec(String(categoria || ""));
+    return m ? idx.get(PB.E.norm(m[1])) || idx.get(PB.E.norm(m[2])) || null : null;
+  };
+  /* Bases de cálculo de cada lançamento:
+   *  - visão "Competência": só DRE;  - visão "Caixa": só DFC/Fluxo (realizado ou previsto);
+   *  - sem visão (planilha padrão e bases antigas): DRE se Realizado/Em aberto, caixa conforme o status. */
+  PB.naDRE = (l) => (l.visao ? l.visao === "Competência" : l.status === "Realizado" || l.status === "Em aberto");
+  PB.caixaRealizado = (l) => (l.visao ? l.visao === "Caixa" && l.status === "Realizado" : l.status === "Realizado");
+  PB.caixaPrevisto = (l) => l.visao !== "Competência" && l.status !== "Realizado";
 
   /* ---------------- Autenticação ---------------- */
   const SESSAO = "pb_sessao";
@@ -216,7 +229,8 @@
     return out;
   };
   PB.mesesDisponiveis = (dados) => {
-    const s = new Set(dados.lancamentos.filter((l) => l.status === "Realizado" || l.status === "Em aberto").map((l) => l.competencia));
+    const s = new Set(dados.lancamentos.filter(PB.naDRE).map((l) => l.competencia));
+    dados.lancamentos.forEach((l) => { if (l.visao === "Caixa" && l.status === "Realizado") s.add(l.data.slice(0, 7)); });
     dados.vendas.forEach((v) => s.add(v.data.slice(0, 7)));
     return [...s].sort();
   };
@@ -228,10 +242,10 @@
   function agrupar(dados, meses, tipo, mesDe) {
     const ref = tipo === "DRE" ? "refDRE" : "refDFC", NAO = tipo === "DRE" ? PB.E.NAO_DRE : PB.E.NAO_DFC;
     const folhas = {}, contas = {}, naoClass = new Set();
-    // DRE (competência): realizado + em aberto (competência ocorrida, pagamento pendente). DFC (caixa): só realizado.
-    const entra = tipo === "DRE" ? (s) => s === "Realizado" || s === "Em aberto" : (s) => s === "Realizado";
+    // DRE: visão de competência; DFC: caixa realizado
+    const entra = tipo === "DRE" ? PB.naDRE : PB.caixaRealizado;
     dados.lancamentos.forEach((l) => {
-      if (!entra(l.status)) return;
+      if (!entra(l)) return;
       const i = meses.indexOf(mesDe(l)); if (i < 0) return;
       const c = PB.contaDe(dados, l.categoria);
       let linha = c && c[ref];
@@ -293,14 +307,16 @@
     let antes = 0;
     const mesAtual = new Date().toISOString().slice(0, 7);
     dados.lancamentos.forEach((l) => {
+      const real = PB.caixaRealizado(l);
+      if (!real && !PB.caixaPrevisto(l)) return; // visão de competência não é caixa
       const c = PB.contaDe(dados, l.categoria);
       if (c && c.refDFC === PB.E.NAO_DFC) return; // ex.: depreciação — não movimenta caixa
       let ym = l.data.slice(0, 7); const v = l.tipo === "Receita" ? l.valor : -l.valor;
       // a receber/pagar vencido e não quitado não é caixa do passado: entra como previsto no mês atual
-      if (l.status !== "Realizado" && ym < mesAtual) { if (!meses.includes(mesAtual)) return; ym = mesAtual; }
+      if (!real && ym < mesAtual) { if (!meses.includes(mesAtual)) return; ym = mesAtual; }
       const i = meses.indexOf(ym);
-      if (i < 0) { if (ym < meses[0] && l.data >= dataIni && l.status === "Realizado") antes += v; return; }
-      if (l.status === "Realizado") (v > 0 ? ent : sai)[i] += Math.abs(v);
+      if (i < 0) { if (ym < meses[0] && l.data >= dataIni && real) antes += v; return; }
+      if (real) (v > 0 ? ent : sai)[i] += Math.abs(v);
       else (v > 0 ? entP : saiP)[i] += Math.abs(v);
     });
     let saldo = saldoIni0 + antes;

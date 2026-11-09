@@ -146,9 +146,9 @@
           <div class="inline" id="ca-sync" style="margin-bottom:6px">
             <div><label for="ca-de">Competência de</label><input type="month" id="ca-de"></div>
             <div><label for="ca-ate">até</label><input type="month" id="ca-ate"></div>
-            <button class="btn btn-primary" id="btn-ca-sync">Buscar extrato completo</button>
+            <button class="btn btn-primary" id="btn-ca-sync">Buscar competência e caixa do período</button>
           </div>
-          <p class="muted" style="font-size:13px;margin:8px 0 0">Busca todas as parcelas com competência no período e todos os pagamentos desde o início dele, com data de caixa, conta bancária, rateio por categoria e centro de custo, juros, descontos, saldos das contas e itens das vendas. Os dados passam pela mesma validação e prévia abaixo antes de serem publicados. Sem integração? Use a exportação do <b>Extrato de movimentações</b> do Conta Azul no passo 1.</p>
+          <p class="muted" style="font-size:13px;margin:8px 0 0">Monta, somente para o período escolhido, as mesmas duas bases dos relatórios do Conta Azul: a <b>Visão Competência</b> (DRE) e o <b>Extrato de movimentações</b> (DFC e Fluxo de Caixa). Para conferir ou se a integração não estiver disponível, exporte os dois relatórios e importe-os no passo 1. Os dados passam pela validação e prévia abaixo antes de serem publicados. Sem integração? Use a exportação do <b>Extrato de movimentações</b> do Conta Azul no passo 1.</p>
         </div>
 
         <div class="panel">
@@ -156,17 +156,16 @@
           <div class="form-grid" style="margin-bottom:14px">
             <div><label for="imp-origem">Formato do arquivo</label>
               <select id="imp-origem">
+                <option value="ca-auto">Conta Azul — Visão Competência ou Extrato de movimentações (detecta automaticamente)</option>
+                <option value="ca-competencia">Conta Azul — Visão Competência (base da DRE)</option>
+                <option value="ca-extrato">Conta Azul — Extrato de movimentações (base do DFC e do Fluxo de Caixa)</option>
                 <option value="padrao">Planilha padrão Patagonia (todas as abas)</option>
-                <option value="ca-fin">Conta Azul — Extrato de movimentações (modelo padrão Conta Azul)</option>
-                <option value="ca-fin-rec">Conta Azul — Contas a receber (exportação)</option>
-                <option value="ca-fin-pag">Conta Azul — Contas a pagar (exportação)</option>
                 <option value="ca-vendas">Conta Azul — Relatório de vendas</option>
               </select></div>
             <div><label for="imp-modo">Como aplicar</label>
               <select id="imp-modo">
                 <option value="meses">Substituir somente os meses presentes no arquivo</option>
                 <option value="tudo">Substituir toda a base</option>
-                <option value="contaazul">Sincronização Conta Azul (competências do período + pagamentos desde o início)</option>
               </select></div>
             <div id="campo-tipo-item" class="hidden"><label for="imp-tipoitem">Tipo padrão dos itens (se o arquivo não informar)</label>
               <select id="imp-tipoitem"><option>Produto</option><option>Serviço</option></select></div>
@@ -245,13 +244,24 @@
               <p class="muted">Mesmo layout, com dados fictícios, para treinar a equipe ou enviar ao cliente como referência.</p>
               <button class="btn btn-outline btn-sm" id="dl-exemplo">Baixar exemplo</button></div>
           </div>
+          <div class="card template-card">
+            <div class="icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 10h18M8 2v4M16 2v4"/></svg></div>
+            <div><h3>Modelo manual — Visão de Competência</h3>
+              <p class="muted">Mesmas colunas do relatório <b>Financeiro → Visão Competência</b> do Conta Azul. Base da DRE para clientes sem Conta Azul.</p>
+              <button class="btn btn-primary btn-sm" id="dl-modelo-comp">Baixar modelo .xlsx</button></div>
+          </div>
+          <div class="card template-card">
+            <div class="icon"><svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></div>
+            <div><h3>Modelo manual — Extrato de movimentações</h3>
+              <p class="muted">Mesmas colunas do relatório <b>Financeiro → Extrato de movimentações</b> do Conta Azul. Base do DFC e do Fluxo de Caixa.</p>
+              <button class="btn btn-primary btn-sm" id="dl-modelo-ext">Baixar modelo .xlsx</button></div>
+          </div>
           <div class="card">
-            <h3>Clientes Conta Azul</h3>
-            <p class="muted" style="margin-bottom:8px">Exporte do Conta Azul e importe direto, sem redigitar:</p>
+            <h3>Clientes Conta Azul — o que exportar todo mês</h3>
             <ul>
-              <li><b>Financeiro → Extrato de movimentações</b> (ou Contas a pagar/receber) → Exportar Excel → formato <i>Conta Azul — Extrato</i>.</li>
-              <li><b>Vendas → Relatório de vendas</b> → Exportar Excel → formato <i>Conta Azul — Relatório de vendas</i>.</li>
-              <li>As colunas são reconhecidas pelo nome (ex.: “Data de competência”, “Categoria”, “Valor”, “Data do pagamento”).</li>
+              <li><b>Financeiro → Visão Competência</b> → período do mês → Exportar Excel. Alimenta a <b>DRE</b> e os relatórios por competência.</li>
+              <li><b>Financeiro → Extrato de movimentações</b> → período do mês, todas as contas → Exportar Excel. Alimenta o <b>DFC</b>, o <b>Fluxo de Caixa</b> e o saldo das contas.</li>
+              <li>Em <b>Importar dados</b>, use o formato “detecta automaticamente” e importe os dois arquivos do mês, um de cada vez. Cada um substitui só a sua visão nos meses do arquivo.</li>
             </ul>
           </div>
         </div>

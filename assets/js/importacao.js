@@ -104,7 +104,7 @@
     pagamento: ["datapagamento", "pagamento", "datadopagamento", "datadebaixa", "datarecebimento", "dataquitacao"],
     data: ["datamovimentacao", "datadamovimentacao", "datalancamento"],
     categoria: ["categoria1", "categoriafinanceira", "planodecontas"],
-    valor: ["valorr", "valorrs", "valorliquido", "valortotal", "valororiginal"],
+    valor: ["valorr", "valorr", "valorliquido", "valortotal", "valororiginal"],
     tipo: ["receitadespesa", "natureza", "tipodelancamento", "tipomovimentacao"],
     situacao: ["status", "situacaodolancamento"],
     conta: ["conta", "contafinanceira", "banco"],
@@ -134,6 +134,202 @@
     return { parcial: { lancamentos: lanc }, avisos: [`Colunas reconhecidas: ${Object.keys(r.mapa).join(", ")}`] };
   };
 
+  /* =========================================================
+     CONTA AZUL — RELATÓRIOS FINANCEIROS (base dos relatórios do portal)
+     1) Financeiro → Visão Competência      → visão "Competência" (DRE)
+     2) Financeiro → Extrato de movimentações → visão "Caixa" (DFC e Fluxo de Caixa)
+     Colunas reconhecidas pelo nome; "Categoria N / Valor na Categoria N" e
+     "Centro de Custo N / Valor no Centro de Custo N" em qualquer quantidade.
+     Os valores das categorias vêm com sinal (+ entra, − sai) e somam o "Valor (R$)"
+     da linha: cada categoria vira um lançamento, com o tipo dado pelo sinal
+     (ex.: desconto obtido dentro de uma compra = receita naquela categoria).
+     ========================================================= */
+  const r2 = (v) => Math.round(v * 100) / 100;
+  const brl = (v) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const mesBR = (ym) => { const [y, m] = ym.split("-"); return `${["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"][+m - 1]}/${y}`; };
+
+  /** Localiza a tabela do relatório: linha de cabeçalho e índice de cada coluna (por nome normalizado). */
+  function tabelaContaAzul(wb) {
+    for (const nome of wb.SheetNames) {
+      const linhas = XLSX.utils.sheet_to_json(wb.Sheets[nome], { header: 1, raw: true, defval: null });
+      for (let i = 0; i < Math.min(linhas.length, 20); i++) {
+        const cab = (linhas[i] || []).map(norm);
+        if (!cab.includes("valorr")) continue;
+        const tipo = cab.includes("datamovimento") ? "extrato" : cab.includes("datadecompetencia") ? "competencia" : null;
+        if (!tipo) continue;
+        const col = {}; cab.forEach((h, j) => { if (h && col[h] == null) col[h] = j; });
+        const cats = [], ccs = [];
+        cab.forEach((h, j) => {
+          let m = /^categoria(\d+)$/.exec(h); if (m && col["valornacategoria" + m[1]] != null) cats.push([j, col["valornacategoria" + m[1]]]);
+          m = /^centrodecusto(\d+)$/.exec(h); if (m && col["valornocentrodecusto" + m[1]] != null) ccs.push([j, col["valornocentrodecusto" + m[1]]]);
+        });
+        return { tipo, aba: nome, inicio: i, col, cats, ccs, linhas };
+      }
+    }
+    return null;
+  }
+  /** Quebra uma linha do relatório em lançamentos por categoria (e por centro de custo, proporcionalmente). */
+  function porCategoria(L, t, valorLinha, base) {
+    const out = [];
+    let cats = t.cats.map(([c, v]) => ({ nome: String(L[c] ?? "").trim(), valor: paraNumero(L[v]) || 0 })).filter((x) => x.nome && Math.abs(x.valor) >= 0.005);
+    if (!cats.length && Math.abs(valorLinha) >= 0.005) cats = [{ nome: "Sem categoria", valor: valorLinha }];
+    const ccs = t.ccs.map(([c, v]) => ({ nome: String(L[c] ?? "").trim(), valor: Math.abs(paraNumero(L[v]) || 0) })).filter((x) => x.nome && x.valor >= 0.005);
+    const somaCC = ccs.reduce((s, x) => s + x.valor, 0);
+    cats.forEach((cat) => {
+      const partes = somaCC > 0 ? ccs.map((cc) => ({ cc: cc.nome, v: cat.valor * (cc.valor / somaCC) })) : [{ cc: "", v: cat.valor }];
+      partes.forEach((p) => { if (Math.abs(p.v) >= 0.005) out.push({ ...base, categoria: cat.nome, centroCusto: p.cc, tipo: p.v >= 0 ? "Receita" : "Despesa", valor: r2(Math.abs(p.v)) }); });
+    });
+    return out;
+  }
+  const ehTransferencia = (origem, cat) => /transfer/i.test(origem || "") || /^transfer[eê]ncia/i.test(cat || "");
+  const ehSaldoInicial = (origem, cat) => /saldo\s*conta/i.test(origem || "") || /^saldo inicial/i.test(cat || "");
+  const val = (L, t, nome) => (t.col[nome] != null ? L[t.col[nome]] : null);
+  const txt = (L, t, nome) => String(val(L, t, nome) ?? "").trim();
+
+  /** Visão de Competência → lançamentos da visão "Competência" (DRE). */
+  IMP.lerContaAzulCompetencia = function (wb) {
+    const t = tabelaContaAzul(wb);
+    if (!t) return { parcial: {}, avisos: ["Relatório não reconhecido. Exporte do Conta Azul em Financeiro → Visão Competência (Excel)."] };
+    if (t.tipo !== "competencia") return { parcial: {}, avisos: ["Este arquivo é o Extrato de movimentações (visão de caixa). Escolha o formato “Conta Azul — Extrato de movimentações”."], tipoDetectado: t.tipo };
+    const lanc = [], meses = {}; let ignorados = 0, rec = 0, desp = 0;
+    for (let i = t.inicio + 1; i < t.linhas.length; i++) {
+      const L = t.linhas[i]; if (!L || L.every((x) => x == null || x === "")) continue;
+      const data = paraData(val(L, t, "datadecompetencia")); const valor = paraNumero(val(L, t, "valorr"));
+      if (!data || valor == null) continue; // linhas de total/rodapé
+      const origem = txt(L, t, "origemdolancamento"), cat1 = t.cats.length ? String(L[t.cats[0][0]] ?? "") : "";
+      if (ehTransferencia(origem, cat1) || ehSaldoInicial(origem, cat1)) { ignorados++; continue; }
+      const desc = [txt(L, t, "descricao"), txt(L, t, "notafiscal")].filter(Boolean).join(" · ");
+      const base = { _linha: i + 1, data, competencia: data.slice(0, 7), descricao: desc, status: "Realizado", visao: "Competência", conta: "", contraparte: txt(L, t, "nomedofornecedorcliente"), origem };
+      porCategoria(L, t, valor, base).forEach((l) => { lanc.push(l); if (l.tipo === "Receita") rec += l.valor; else desp += l.valor; });
+      meses[data.slice(0, 7)] = (meses[data.slice(0, 7)] || 0) + 1;
+    }
+    const lista = Object.keys(meses).sort();
+    const avisos = [`Visão de Competência: ${lanc.length} lançamento(s) por categoria em ${lista.map(mesBR).join(", ") || "—"} · entradas ${brl(r2(rec))} · saídas ${brl(r2(desp))} · resultado ${brl(r2(rec - desp))}.`];
+    if (ignorados) avisos.push(`${ignorados} linha(s) de transferência/saldo inicial ignoradas (não são receita nem despesa).`);
+    avisos.push("Base da DRE e dos relatórios por competência. Substitui apenas a visão de competência dos meses acima.");
+    return { parcial: { lancamentos: lanc }, avisos, tipoDetectado: "competencia", meses: lista };
+  };
+
+  /** Extrato de movimentações → lançamentos da visão "Caixa" (DFC/Fluxo) + saldo inicial consolidado. */
+  IMP.lerContaAzulExtrato = function (wb) {
+    const t = tabelaContaAzul(wb);
+    if (!t) return { parcial: {}, avisos: ["Relatório não reconhecido. Exporte do Conta Azul em Financeiro → Extrato de movimentações (Excel)."] };
+    if (t.tipo !== "extrato") return { parcial: {}, avisos: ["Este arquivo é a Visão de Competência. Escolha o formato “Conta Azul — Visão de Competência”."], tipoDetectado: t.tipo };
+    const REALIZADO = /concilia|quitad|transferid|pago|recebid|baixad|liquidad/i;
+    const lanc = [], meses = {};
+    let abertura = null, primeiraData = null, ajusteSaldo = 0, nTransf = 0, somaTransf = 0, nSaldoIni = 0, previstos = 0, ent = 0, sai = 0, ultimoSaldo = null, somaPrevistos = 0;
+    for (let i = t.inicio + 1; i < t.linhas.length; i++) {
+      const L = t.linhas[i]; if (!L || L.every((x) => x == null || x === "")) continue;
+      const mov = paraData(val(L, t, "datamovimento")); const valor = paraNumero(val(L, t, "valorr"));
+      if (!mov || valor == null) continue;
+      const saldo = paraNumero(val(L, t, "saldocontar"));
+      if (abertura == null && saldo != null) { abertura = saldo - valor; primeiraData = mov; }
+      if (saldo != null) ultimoSaldo = saldo;
+      const situacao = txt(L, t, "situacao"), realizado = REALIZADO.test(situacao);
+      const origem = txt(L, t, "origemdolancamento"), cat1 = t.cats.length ? String(L[t.cats[0][0]] ?? "") : "";
+      if (!realizado) somaPrevistos += valor;
+      if (ehTransferencia(origem, cat1)) { nTransf++; somaTransf += valor; continue; }
+      if (ehSaldoInicial(origem, cat1)) { nSaldoIni++; if (realizado) ajusteSaldo += valor; continue; }
+      const data = realizado ? mov : paraData(val(L, t, "dataprevista")) || paraData(val(L, t, "dataoriginaldevencimento")) || mov;
+      const comp = paraData(val(L, t, "datadecompetencia")) || data;
+      const desc = [txt(L, t, "descricao"), txt(L, t, "notafiscal")].filter(Boolean).join(" · ");
+      const base = { _linha: i + 1, data, competencia: comp.slice(0, 7), descricao: desc, status: realizado ? "Realizado" : "Previsto", visao: "Caixa", conta: txt(L, t, "contabancaria"), contraparte: txt(L, t, "nomedofornecedorcliente"), origem, formaPagamento: txt(L, t, "formadepgtorecbto") };
+      porCategoria(L, t, valor, base).forEach((l) => { lanc.push(l); if (realizado) { if (l.tipo === "Receita") ent += l.valor; else sai += l.valor; } });
+      if (!realizado) previstos++;
+      meses[data.slice(0, 7)] = (meses[data.slice(0, 7)] || 0) + 1;
+    }
+    const lista = Object.keys(meses).sort();
+    const avisos = [`Extrato de movimentações: ${lanc.length} lançamento(s) por categoria em ${lista.map(mesBR).join(", ") || "—"} · entradas realizadas ${brl(r2(ent))} · saídas realizadas ${brl(r2(sai))} · geração de caixa ${brl(r2(ent - sai))}.`];
+    if (previstos) avisos.push(`${previstos} movimento(s) ainda não quitado(s) (ex.: atrasados) entram como previstos na data prevista — fora do caixa realizado.`);
+    if (nTransf) avisos.push(`${nTransf} transferência(s) entre contas ignoradas (saldo líquido ${brl(r2(somaTransf))}: não são entrada nem saída de caixa).`);
+    if (nSaldoIni) avisos.push(`${nSaldoIni} lançamento(s) de saldo inicial de conta incorporados ao saldo inicial (${brl(r2(ajusteSaldo))}).`);
+    const parcial = { lancamentos: lanc };
+    if (abertura != null && primeiraData) {
+      const diaAntes = new Date(Date.parse(primeiraData) - 864e5).toISOString().slice(0, 10);
+      const saldoIni = r2(abertura + ajusteSaldo);
+      parcial.contas = [{ _linha: 1, conta: "Saldo consolidado das contas (Conta Azul)", banco: "Conta Azul", saldoInicial: saldoIni, dataSaldo: diaAntes }];
+      const finalRealizado = r2(abertura + ajusteSaldo + ent - sai + somaTransf);
+      const dif = ultimoSaldo != null ? r2(ultimoSaldo - finalRealizado) : 0;
+      avisos.push(`Saldo em ${diaAntes.split("-").reverse().join("/")}: ${brl(saldoIni)} (coluna “Saldo conta”). Saldo final realizado: ${brl(finalRealizado)}${ultimoSaldo != null && Math.abs(dif) < 0.01 ? " — confere com o saldo final do relatório" : ultimoSaldo != null ? ` — o relatório termina em ${brl(ultimoSaldo)} (diferença de ${brl(dif)}, possivelmente movimentos não quitados ou fora de ordem)` : ""}.`);
+    } else avisos.push("Coluna “Saldo conta (R$)” não encontrada: o saldo inicial das contas não foi atualizado.");
+    avisos.push("Base do DFC e do Fluxo de Caixa. Substitui apenas a visão de caixa dos meses acima.");
+    return { parcial, avisos, tipoDetectado: "extrato", meses: lista };
+  };
+
+  /** Lê qualquer um dos dois relatórios, detectando o tipo pelo cabeçalho. */
+  IMP.lerContaAzulRelatorio = function (wb) {
+    const t = tabelaContaAzul(wb);
+    if (!t) return { parcial: {}, avisos: ["Relatório do Conta Azul não reconhecido (esperado: Visão Competência ou Extrato de movimentações)."] };
+    return t.tipo === "extrato" ? IMP.lerContaAzulExtrato(wb) : IMP.lerContaAzulCompetencia(wb);
+  };
+
+  /* ---------- Modelos manuais no formato dos relatórios do Conta Azul (clientes sem Conta Azul) ---------- */
+  IMP.COLUNAS_CA = {
+    competencia: ["Data de competência", "Origem do lançamento", "Recorrência", "Quantidade de recorrência", "Descrição", "Identificador do fornecedor/cliente", "Nome do fornecedor/cliente", "Código de referência", "Condição de pagamento", "Tipo", "Nota fiscal", "Valor (R$)", "Número de parcelas", "Observações", "Categoria 1", "Valor na Categoria 1", "Centro de Custo 1", "Valor no Centro de Custo 1", "Categoria 2", "Valor na Categoria 2", "Centro de Custo 2", "Valor no Centro de Custo 2", "Categoria 3", "Valor na Categoria 3"],
+    extrato: ["Data movimento", "Identificador do fornecedor/cliente", "Nome do fornecedor/cliente", "Recorrência", "Quantidade de recorrência", "Descrição", "Agendado", "Tipo", "Origem do lançamento", "Conta bancária", "Forma de pgto/recbto", "Valor (R$)", "Saldo conta (R$)", "Situação", "Valor original (R$)", "Juros (R$)", "Multa (R$)", "Desconto (R$)", "Taxas (R$)", "Data de competência", "Data original de vencimento", "Data prevista", "Observações", "Nota fiscal", "Categoria 1", "Valor na Categoria 1", "Centro de Custo 1", "Valor no Centro de Custo 1", "Categoria 2", "Valor na Categoria 2", "Centro de Custo 2", "Valor no Centro de Custo 2", "Categoria 3", "Valor na Categoria 3"]
+  };
+  IMP.gerarModeloContaAzul = async function (tipo, plano) {
+    if (!window.ExcelJS) throw new Error("Biblioteca de planilhas não carregada.");
+    const cols = IMP.COLUNAS_CA[tipo], wb = new ExcelJS.Workbook();
+    const nomeAba = tipo === "competencia" ? "Visão Competência" : "Extrato Financeiro";
+    const ws = wb.addWorksheet(nomeAba, { views: [{ state: "frozen", ySplit: 1 }] });
+    ws.addRow(cols);
+    ws.getRow(1).eachCell((c) => { c.font = { bold: true, color: { argb: "FFFFFFFF" } }; c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0070BD" } }; c.alignment = { vertical: "middle", wrapText: true }; });
+    ws.getRow(1).height = 32;
+    cols.forEach((h, i) => { ws.getColumn(i + 1).width = /Descrição|Nome|Categoria \d$|Observações|Conta bancária/.test(h) ? 34 : /Data|Valor|Saldo|Juros|Multa|Desconto|Taxas/.test(h) ? 15 : 18; });
+    const ex = tipo === "competencia"
+      ? [
+        { "Data de competência": "01/10/2026", "Origem do lançamento": "Venda", "Descrição": "Venda 1290", "Nome do fornecedor/cliente": "Cliente Exemplo Ltda", "Condição de pagamento": "1x", "Tipo": "Receita", "Valor (R$)": 1246, "Número de parcelas": 1, "Categoria 1": "Receitas de Vendas", "Valor na Categoria 1": 1246, "Centro de Custo 1": "Fábrica", "Valor no Centro de Custo 1": 1246 },
+        { "Data de competência": "01/10/2026", "Origem do lançamento": "Compra", "Descrição": "Compra 268 (NFe 2640-0)", "Nome do fornecedor/cliente": "Fornecedor Exemplo ME", "Condição de pagamento": "1x", "Tipo": "Despesa", "Valor (R$)": -394.25, "Número de parcelas": 1, "Categoria 1": "Fornecedores de Matérias-Primas", "Valor na Categoria 1": -415, "Categoria 2": "Descontos Obtidos", "Valor na Categoria 2": 20.75 }
+      ]
+      : [
+        { "Data movimento": "01/10/2026", "Nome do fornecedor/cliente": "Cliente Exemplo Ltda", "Descrição": "Venda 1235", "Tipo": "Receita", "Origem do lançamento": "Venda", "Conta bancária": "Conta Corrente - Banco", "Forma de pgto/recbto": "Boleto bancário", "Valor (R$)": 992.77, "Saldo conta (R$)": 50992.77, "Situação": "Conciliado", "Valor original (R$)": 1200, "Taxas (R$)": 207.23, "Data de competência": "23/09/2026", "Data original de vencimento": "29/09/2026", "Data prevista": "29/09/2026", "Categoria 1": "Receitas de Vendas", "Valor na Categoria 1": 992.77, "Centro de Custo 1": "Fábrica", "Valor no Centro de Custo 1": 992.77 },
+        { "Data movimento": "02/10/2026", "Descrição": "Aluguel do escritório", "Tipo": "Despesa", "Origem do lançamento": "Lançamento Financeiro", "Conta bancária": "Conta Corrente - Banco", "Forma de pgto/recbto": "Pagamento instantâneo", "Valor (R$)": -2500, "Saldo conta (R$)": 48492.77, "Situação": "Conciliado", "Valor original (R$)": -2500, "Data de competência": "01/10/2026", "Data original de vencimento": "02/10/2026", "Data prevista": "02/10/2026", "Categoria 1": "Aluguel", "Valor na Categoria 1": -2500 }
+      ];
+    ex.forEach((o) => { const r = ws.addRow(cols.map((h) => o[h] ?? null)); r.font = { color: { argb: "FF5B6B7D" }, italic: true }; });
+    cols.forEach((h, i) => { if (/^Valor|Saldo|Juros|Multa|Desconto|Taxas/.test(h)) ws.getColumn(i + 1).numFmt = "#,##0.00;[Red]-#,##0.00"; });
+    // listas de valores
+    const L = wb.addWorksheet("Listas");
+    const categorias = (plano || []).filter((c) => c.tipo === "Analítica").map((c) => (c.numero ? `${c.numero} - ${c.nome}` : c.nome));
+    L.addRow(["Tipo", "Situação", "Origem do lançamento", "Categorias do plano de contas do cliente"]);
+    const tipos = ["Receita", "Despesa"], sits = ["Conciliado", "Quitado", "Em aberto", "Atrasado"], origens = ["Lançamento Financeiro", "Venda", "Compra", "Transferência", "Saldo Conta Bancária"];
+    for (let i = 0; i < Math.max(4, categorias.length, origens.length); i++) L.addRow([tipos[i] || null, sits[i] || null, origens[i] || null, categorias[i] || null]);
+    L.getRow(1).font = { bold: true }; [14, 14, 24, 60].forEach((w, i) => (L.getColumn(i + 1).width = w));
+    const iTipo = cols.indexOf("Tipo") + 1, iSit = cols.indexOf("Situação") + 1;
+    for (let r = 2; r <= 1000; r++) {
+      if (iTipo) ws.getCell(r, iTipo).dataValidation = { type: "list", allowBlank: true, formulae: ["Listas!$A$2:$A$3"] };
+      if (iSit > 0) ws.getCell(r, iSit).dataValidation = { type: "list", allowBlank: true, formulae: ["Listas!$B$2:$B$5"] };
+      if (categorias.length) cols.forEach((h, k) => { if (/^Categoria \d$/.test(h)) ws.getCell(r, k + 1).dataValidation = { type: "list", allowBlank: true, formulae: [`Listas!$D$2:$D$${categorias.length + 1}`] }; });
+    }
+    // instruções
+    const I = wb.addWorksheet("Instruções");
+    const textos = tipo === "competencia" ? [
+      "Modelo manual no formato do relatório Financeiro → Visão Competência do Conta Azul (base da DRE).",
+      "Uma linha por lançamento (venda, compra, despesa, receita), na data de competência — o mês a que o fato pertence, independentemente do pagamento.",
+      "Valor (R$): positivo para receitas e negativo para despesas. Use o valor total do lançamento (todas as parcelas).",
+      "Categoria N / Valor na Categoria N: rateio do valor nas contas do plano de contas, com sinal. A soma das categorias deve ser igual ao Valor (R$). Ex.: compra de -415,00 com desconto obtido de 20,75 → Categoria 1 = -415,00 e Categoria 2 = 20,75.",
+      "Centro de Custo N / Valor no Centro de Custo N: opcional; o valor é rateado proporcionalmente entre as categorias.",
+      "Transferências entre contas e saldos iniciais não fazem parte deste relatório.",
+      "As linhas de exemplo (em cinza) podem ser apagadas. Os nomes das colunas não devem ser alterados."
+    ] : [
+      "Modelo manual no formato do relatório Financeiro → Extrato de movimentações do Conta Azul (base do DFC e do Fluxo de Caixa).",
+      "Uma linha por movimento de dinheiro, na data em que entrou ou saiu da conta (Data movimento), em ordem cronológica.",
+      "Valor (R$): positivo para entradas e negativo para saídas — o valor efetivamente movimentado (já com juros, multas, descontos e taxas).",
+      "Saldo conta (R$): saldo acumulado após o movimento, somando todas as contas. É usado para calcular o saldo inicial do período (saldo da 1ª linha − valor da 1ª linha).",
+      "Situação: Conciliado ou Quitado = realizado; Em aberto ou Atrasado = previsto (fora do caixa realizado).",
+      "Categoria N / Valor na Categoria N: rateio do valor movimentado nas contas do plano de contas, com sinal; a soma deve ser igual ao Valor (R$).",
+      "Transferências entre contas: Origem do lançamento = Transferência (são ignoradas no DFC). Saldo inicial de conta: Origem = Saldo Conta Bancária.",
+      "As linhas de exemplo (em cinza) podem ser apagadas. Os nomes das colunas não devem ser alterados."
+    ];
+    I.getColumn(1).width = 130; I.addRow([`Patagonia Business — ${nomeAba}`]).font = { bold: true, size: 14 };
+    textos.forEach((x) => { const r = I.addRow([x]); r.alignment = { wrapText: true, vertical: "top" }; });
+    const buf = await wb.xlsx.writeBuffer();
+    const nome = tipo === "competencia" ? "Modelo manual - Visão de Competência (formato Conta Azul).xlsx" : "Modelo manual - Extrato de movimentações (formato Conta Azul).xlsx";
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    a.download = nome; document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    return nome;
+  };
+
   /* ---------- Conta Azul: relatório de vendas ---------- */
   const CA_VENDAS_APELIDOS = {
     data: ["datadavenda", "dataemissao", "datadeemissao", "emissao"],
@@ -159,96 +355,77 @@
     return { parcial: { vendas }, avisos: [`Colunas reconhecidas: ${Object.keys(r.mapa).join(", ")}`] };
   };
 
-  /* ---------- Conta Azul via API: extrato completo (competência + caixa) ----------
-   * Cada parcela vira:
-   *  - uma linha "Realizado" por baixa (data de caixa = data do pagamento, conta da baixa), por categoria e centro de custo;
-   *  - juros/multa, descontos e taxas de cada baixa em linhas próprias (competência = mês do pagamento);
-   *  - o saldo não pago: "Em aberto" (competência já ocorrida, entra na DRE; caixa previsto no vencimento)
-   *    ou "Previsto" (competência futura).
-   * A competência de cada linha é a do evento financeiro, então a DRE reproduz o regime de competência do Conta Azul
-   * e o DFC/Fluxo reproduzem o extrato de caixa.
+  /* ---------- Conta Azul via API: mesmo modelo dos relatórios (somente o período pedido) ----------
+   *  - Visão "Competência" (= relatório Visão Competência): cada parcela com competência no período,
+   *    pelo valor da parcela, rateado por categoria (com sinal) e centro de custo.
+   *  - Visão "Caixa" (= Extrato de movimentações): cada baixa com data no período, pelo valor movimentado
+   *    (líquido de juros/multa/desconto/taxas), na conta da baixa; e o saldo em aberto das parcelas que
+   *    vencem no período, como previsto.
    */
-  IMP.AJUSTES_CA = {
-    jurosRec: { tipo: "Receita", categoria: "Juros e Multas Recebidos" },
-    jurosPag: { tipo: "Despesa", categoria: "Juros e Tarifas Bancárias" },
-    descConc: { tipo: "Despesa", categoria: "Devoluções e Descontos Concedidos" },
-    descObt: { tipo: "Receita", categoria: "Descontos Obtidos" },
-    taxa: { tipo: "Despesa", categoria: "Juros e Tarifas Bancárias" }
-  };
   IMP.montarContaAzulAPI = function (lista, det) {
-    const avisos = [], lanc = [], r2 = (v) => Math.round(v * 100) / 100;
-    const mesAtual = lista.periodo.hoje.slice(0, 7);
+    const avisos = [], lanc = [];
+    const { ini, fim, hoje } = lista.periodo;
     const detP = new Map((det.parcelas || []).map((d) => [d.id, d]));
-    let semDetalhe = 0, perdidas = 0, renegociadas = 0;
+    let semDetalhe = 0, ignoradas = 0, rec = 0, desp = 0, ent = 0, sai = 0;
     const add = (o) => { if (o.valor >= 0.005) lanc.push({ _linha: lanc.length + 1, fonte: "contaazul", ...o, valor: r2(o.valor) }); };
-    lista.parcelas.forEach((p) => {
-      const d = detP.get(p.id);
-      const comp = String((d && d.competencia) || p.competencia || p.vencimento || lista.periodo.ini).slice(0, 7);
-      // partes de rateio (categoria × centro de custo) com a fração do valor de cada uma
-      let partes = [];
-      const rat = (d && d.rateio || []).filter((r) => r.valor > 0);
+    // partes (categoria × centro de custo) com fração com sinal em relação ao valor da parcela
+    const partesDe = (p, d) => {
+      const out = [], rat = ((d && d.rateio) || []).filter((r) => Math.abs(r.valor) >= 0.005);
       const somaR = rat.reduce((s, r) => s + r.valor, 0);
-      if (somaR > 0) rat.forEach((r) => {
-        const cc = r.centros.filter((c) => c.valor > 0), somaC = cc.reduce((s, c) => s + c.valor, 0);
-        if (somaC > 0) cc.forEach((c) => partes.push({ categoria: r.categoria, centro: c.nome, f: (r.valor / somaR) * (c.valor / somaC) }));
-        else partes.push({ categoria: r.categoria, centro: "", f: r.valor / somaR });
+      if (rat.length && Math.abs(somaR) >= 0.005) rat.forEach((r) => {
+        const cc = r.centros.filter((c) => Math.abs(c.valor) >= 0.005), somaC = cc.reduce((s, c) => s + Math.abs(c.valor), 0);
+        const f = r.valor / somaR; // ex.: desconto obtido dentro da compra → fração negativa = sentido oposto
+        if (somaC > 0) cc.forEach((c) => out.push({ categoria: r.categoria, centro: c.nome, f: f * (Math.abs(c.valor) / somaC) }));
+        else out.push({ categoria: r.categoria, centro: "", f });
       });
-      if (!partes.length) {
-        const cats = p.categorias.length ? p.categorias : ["Sem categoria"];
-        partes = cats.map((c) => ({ categoria: c, centro: p.centros.length === 1 ? p.centros[0] : "", f: 1 / cats.length }));
+      if (!out.length) { const cats = p.categorias.length ? p.categorias : ["Sem categoria"]; cats.forEach((c) => out.push({ categoria: c, centro: p.centros.length === 1 ? p.centros[0] : "", f: 1 / cats.length })); }
+      return out;
+    };
+    const oposto = (t) => (t === "Receita" ? "Despesa" : "Receita");
+    lista.parcelas.forEach((p) => {
+      const d = detP.get(p.id), partes = partesDe(p, d);
+      const comp = String((d && d.competencia) || p.competencia || p.vencimento || ini).slice(0, 10);
+      const base = { descricao: p.descricao, contraparte: p.contraparte, idOrigem: p.id };
+      const linha = (valorBase, extra) => partes.forEach((x) => { const v = valorBase * x.f; add({ ...base, ...extra, categoria: x.categoria, centroCusto: x.centro, tipo: v >= 0 ? p.tipo : oposto(p.tipo), valor: Math.abs(v) }); });
+      // Competência
+      if (p.porComp && comp >= ini && comp <= fim) {
+        linha(p.total, { data: comp, competencia: comp.slice(0, 7), status: "Realizado", visao: "Competência", conta: "" });
+        partes.forEach((x) => { const v = p.total * x.f; if ((v >= 0) === (p.tipo === "Receita")) rec += Math.abs(v); else desp += Math.abs(v); });
       }
-      const base = { tipo: p.tipo, descricao: p.descricao, contraparte: p.contraparte, idOrigem: p.id };
-      // pagamentos (caixa)
-      const baixas = (d && d.baixas) || [];
-      if (p.pago > 0 && !baixas.length) semDetalhe++;
-      baixas.forEach((b) => {
-        if (!b.data) return;
-        const principal = b.bruto || b.liquido;
-        partes.forEach((x) => add({ ...base, data: b.data, competencia: comp, categoria: x.categoria, centroCusto: x.centro, conta: b.conta, status: "Realizado", valor: principal * x.f }));
-        const compPg = b.data.slice(0, 7), rec = p.tipo === "Receita";
-        const extra = (aj, v, txt) => v > 0 && add({ ...base, ...IMP.AJUSTES_CA[aj], descricao: `${txt} — ${p.descricao}`, data: b.data, competencia: compPg, centroCusto: "", conta: b.conta, status: "Realizado", valor: v });
-        extra(rec ? "jurosRec" : "jurosPag", b.juros + b.multa, "Juros/multa");
-        extra(rec ? "descConc" : "descObt", b.desconto, "Desconto");
-        extra("taxa", b.taxa, "Taxa");
-      });
-      // saldo não pago
+      // Caixa realizado: baixas no período
+      if (p.porPgto) {
+        const baixas = (d && d.baixas) || [];
+        if (!baixas.length) semDetalhe++;
+        baixas.filter((b) => b.data && b.data >= ini && b.data <= fim).forEach((b) => {
+          const mov = b.liquido || b.bruto;
+          linha(mov, { data: b.data, competencia: comp.slice(0, 7), status: "Realizado", visao: "Caixa", conta: b.conta });
+          if (p.tipo === "Receita") ent += mov; else sai += mov;
+        });
+      }
+      // Caixa previsto: saldo em aberto com vencimento no período
       const st = String((d && d.status) || p.status).toUpperCase();
-      if (p.naoPago > 0.005) {
-        if (/PERDID|CANCEL/.test(st)) perdidas++;
-        else if (/RENEGOCI/.test(st)) renegociadas++;
-        else partes.forEach((x) => add({ ...base, data: p.vencimento || `${comp}-01`, competencia: comp, categoria: x.categoria, centroCusto: x.centro, conta: (d && d.conta) || "", status: comp <= mesAtual ? "Em aberto" : "Previsto", valor: p.naoPago * x.f }));
+      if (p.porVenc && p.naoPago > 0.005 && p.vencimento >= ini && p.vencimento <= fim) {
+        if (/PERDID|CANCEL|RENEGOCI/.test(st)) ignoradas++;
+        else linha(p.naoPago, { data: p.vencimento, competencia: comp.slice(0, 7), status: "Previsto", visao: "Caixa", conta: (d && d.conta) || "" });
       }
     });
-    if (semDetalhe) avisos.push(`${semDetalhe} parcela(s) pagas sem detalhe de baixa (falha na consulta) — refaça a busca para completar o caixa.`);
-    if (perdidas) avisos.push(`${perdidas} parcela(s) perdidas/canceladas: o valor não recebido ficou fora dos relatórios.`);
-    if (renegociadas) avisos.push(`${renegociadas} parcela(s) renegociadas: o saldo original foi ignorado (as novas parcelas da renegociação entram no lugar).`);
+    avisos.push(`Visão de Competência (API): entradas ${brl(r2(rec))} · saídas ${brl(r2(desp))} · resultado ${brl(r2(rec - desp))}.`);
+    avisos.push(`Visão de Caixa (API): entradas realizadas ${brl(r2(ent))} · saídas realizadas ${brl(r2(sai))} · geração de caixa ${brl(r2(ent - sai))}.`);
+    if (semDetalhe) avisos.push(`${semDetalhe} parcela(s) com pagamento no período sem detalhe de baixa (falha na consulta) — refaça a busca para completar o caixa.`);
+    if (ignoradas) avisos.push(`${ignoradas} parcela(s) perdidas, canceladas ou renegociadas ficaram fora do previsto.`);
 
-    // Contas bancárias: saldo no início do período = saldo atual − movimentos realizados desde então (inclui transferências)
-    const mov = {};
-    lanc.forEach((l) => { if (l.status === "Realizado" && l.data >= lista.periodo.ini) mov[l.conta] = (mov[l.conta] || 0) + (l.tipo === "Receita" ? l.valor : -l.valor); });
-    (lista.transferencias || []).forEach((t) => { if (t.data >= lista.periodo.ini) { mov[t.origem] = (mov[t.origem] || 0) - t.valor; mov[t.destino] = (mov[t.destino] || 0) + t.valor; } });
-    const diaAntes = new Date(Date.parse(lista.periodo.ini) - 864e5).toISOString().slice(0, 10);
-    const contas = (lista.contas || []).filter((c) => c.saldoAtual != null && (c.ativo || mov[c.nome])).map((c, i) => ({ _linha: i + 1, conta: c.nome, banco: c.banco, saldoInicial: r2(c.saldoAtual - (mov[c.nome] || 0)), dataSaldo: diaAntes }));
-    const semSaldo = (lista.contas || []).filter((c) => c.saldoAtual == null).length;
-    if (semSaldo) avisos.push(`${semSaldo} conta(s) financeira(s) sem saldo atual informado pelo Conta Azul — confira os saldos iniciais.`);
-    if (contas.length) avisos.push(`Saldo das ${contas.length} conta(s) em ${diaAntes.split("-").reverse().join("/")} reconstruído a partir do saldo atual e das movimentações.`);
-
-    // Vendas: uma linha por item (sem orçamentos nem canceladas)
-    const itens = new Map((det.vendas || []).map((v) => [v.id, v.itens]));
-    const vendas = [];
-    (lista.vendas || []).filter((v) => !/CANCEL|ORCAMENTO|ORÇAMENTO|RECUSAD|ESPERANDO/i.test(v.situacao)).forEach((v) => {
-      const its = itens.get(v.id);
-      const tipoV = /serv/i.test(v.tipo) ? "Serviço" : "Produto";
-      if (its && its.length) {
-        const somaItens = its.reduce((s, i) => s + i.quantidade * i.valor, 0) || 1;
-        its.forEach((i) => vendas.push({ _linha: vendas.length + 1, data: v.data, numero: v.numero, cliente: v.cliente || "(não informado)", item: i.nome, tipoItem: /serv/i.test(i.tipo) ? "Serviço" : /prod/i.test(i.tipo) ? "Produto" : tipoV, categoriaItem: "", quantidade: i.quantidade, valorUnitario: r2(i.valor), desconto: r2(Math.max(0, i.quantidade * i.valor - (v.total * (i.quantidade * i.valor)) / somaItens)), valorTotal: r2((v.total * (i.quantidade * i.valor)) / somaItens), vendedor: "", regiao: v.cidade }));
-      } else vendas.push({ _linha: vendas.length + 1, data: v.data, numero: v.numero, cliente: v.cliente || "(não informado)", item: "Venda", tipoItem: tipoV, categoriaItem: "", quantidade: 1, valorUnitario: v.total, desconto: 0, valorTotal: v.total, vendedor: "", regiao: v.cidade });
-    });
-    if ((det.totalFalhas || 0) > 0) avisos.push(`${det.totalFalhas} consulta(s) de detalhe falharam. Exemplo: ${det.falhas[0]}`);
+    // Saldo inicial consolidado: só é possível reconstruir quando o período vai até o mês atual
+    // (saldo atual − movimentos realizados desde o início do período). Para meses passados, importe o Extrato.
     const parcial = { lancamentos: lanc };
-    if (contas.length) parcial.contas = contas;
-    if (vendas.length) parcial.vendas = vendas;
-    avisos.push(`Montados ${lanc.length} lançamentos (${lanc.filter((l) => l.status === "Realizado").length} realizados, ${lanc.filter((l) => l.status === "Em aberto").length} em aberto, ${lanc.filter((l) => l.status === "Previsto").length} previstos) e ${vendas.length} itens de venda.`);
+    const comSaldo = (lista.contas || []).filter((c) => c.saldoAtual != null);
+    if (fim >= hoje && comSaldo.length) {
+      const movimento = lanc.filter((l) => l.visao === "Caixa" && l.status === "Realizado" && l.data <= hoje).reduce((s, l) => s + (l.tipo === "Receita" ? l.valor : -l.valor), 0);
+      const atual = comSaldo.reduce((s, c) => s + c.saldoAtual, 0);
+      const diaAntes = new Date(Date.parse(ini) - 864e5).toISOString().slice(0, 10);
+      parcial.contas = [{ _linha: 1, conta: "Saldo consolidado das contas (Conta Azul)", banco: "Conta Azul", saldoInicial: r2(atual - movimento), dataSaldo: diaAntes }];
+      avisos.push(`Saldo em ${diaAntes.split("-").reverse().join("/")}: ${brl(r2(atual - movimento))} (saldo atual de ${comSaldo.length} conta(s) − movimentos do período).`);
+    } else avisos.push("Saldo inicial das contas não alterado: para períodos passados, importe o Extrato de movimentações do mês (traz o saldo).");
+    avisos.push(`Montados ${lanc.length} lançamentos: ${lanc.filter((l) => l.visao === "Competência").length} na visão de competência e ${lanc.filter((l) => l.visao === "Caixa").length} na visão de caixa.`);
     return { parcial, avisos };
   };
 
@@ -278,7 +455,8 @@
     const semPlano = [...new Set((parcial.lancamentos || []).map((l) => l.categoria).filter((c) => c && !PB.contaDe(ref, c)))];
     // duplicidades simples
     const vistos = new Set(); let dup = 0;
-    (parcial.lancamentos || []).forEach((l) => { const k = [l.idOrigem || "", l.data, l.categoria, l.centroCusto || "", l.status, l.valor, l.descricao, l.contraparte].join("|"); if (vistos.has(k)) dup++; vistos.add(k); });
+    // (relatórios do Conta Azul trazem lançamentos legítimos idênticos — ex.: tarifas — por isso o número da linha entra na chave)
+    (parcial.lancamentos || []).forEach((l) => { const k = [l.visao ? l._linha : "", l.idOrigem || "", l.data, l.categoria, l.centroCusto || "", l.status, l.valor, l.descricao, l.contraparte].join("|"); if (vistos.has(k)) dup++; vistos.add(k); });
     if (dup) alertas.push({ aba: "Lancamentos", linha: "-", msg: `${dup} lançamento(s) possivelmente duplicado(s) (mesma data, categoria, valor e descrição)` });
     return { erros, alertas, semPlano };
   };
@@ -435,6 +613,15 @@
         // substitui: competências do período, as mesmas parcelas (idOrigem) e os pagamentos do Conta Azul desde o início do período
         const ids = new Set(L.map((l) => l.idOrigem).filter(Boolean));
         novo.lancamentos = [...novo.lancamentos.filter((l) => !((l.competencia >= periodo.de && l.competencia <= periodo.ate) || (l.idOrigem && ids.has(l.idOrigem)) || (l.fonte === "contaazul" && l.data >= periodo.ini))), ...L];
+      }
+      else if (L.some((l) => l.visao)) {
+        // relatórios do Conta Azul: cada visão substitui só a própria visão nos meses do arquivo
+        //  - Competência: meses de competência; - Caixa: meses do movimento.
+        // Lançamentos antigos sem visão nesses meses também saem (evita contar duas vezes).
+        const mComp = mesesDe(L.filter((l) => l.visao === "Competência"), (l) => l.competencia);
+        const mCaixa = mesesDe(L.filter((l) => l.visao === "Caixa"), (l) => l.data && l.data.slice(0, 7));
+        const sai = (l) => ((l.visao === "Competência" || !l.visao) && mComp.has(l.competencia)) || ((l.visao === "Caixa" || !l.visao) && mCaixa.has(l.data.slice(0, 7)));
+        novo.lancamentos = [...novo.lancamentos.filter((l) => !sai(l)), ...L];
       }
       else { const ms = mesesDe(L, (l) => l.competencia); novo.lancamentos = [...novo.lancamentos.filter((l) => !ms.has(l.competencia)), ...L]; }
       novo.lancamentos.sort((a, b) => a.data.localeCompare(b.data));

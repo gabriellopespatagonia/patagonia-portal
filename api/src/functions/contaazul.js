@@ -217,13 +217,20 @@ async function etapaLista(token, clienteId, de, ate) {
       return paginar(token, caminho, { data_vencimento_de: vde, data_vencimento_ate: vate, ...filtro });
     }
   };
+  // Estritamente o período pedido, nas duas visões (como os relatórios do Conta Azul):
+  //  - Visão Competência: parcelas com competência no período;
+  //  - Extrato (caixa): parcelas com pagamento no período + em aberto com vencimento no período (previstas).
   const porComp = { data_competencia_de: ini, data_competencia_ate: fim };
-  const porPgto = { data_pagamento_de: ini, data_pagamento_ate: hoje };
-  const recC = await buscar(P.receber, porComp), recP = await buscar(P.receber, porPgto);
-  const pagC = await buscar(P.pagar, porComp), pagP = await buscar(P.pagar, porPgto);
+  const porPgto = { data_pagamento_de: ini, data_pagamento_ate: fim };
+  const porVenc = { data_vencimento_de: ini, data_vencimento_ate: fim, status: ["EM_ABERTO", "ATRASADO", "RECEBIDO_PARCIAL"] };
   const mapa = new Map();
-  recC.concat(recP).forEach((x) => mapa.set(x.id, resumoParcela(x, "Receita")));
-  pagC.concat(pagP).forEach((x) => mapa.set(x.id, resumoParcela(x, "Despesa")));
+  const juntar = (lista, tipo, flag) => lista.forEach((x) => { const p = mapa.get(x.id) || resumoParcela(x, tipo); p[flag] = true; mapa.set(x.id, p); });
+  juntar(await buscar(P.receber, porComp), "Receita", "porComp"); juntar(await buscar(P.receber, porPgto), "Receita", "porPgto");
+  juntar(await buscar(P.pagar, porComp), "Despesa", "porComp"); juntar(await buscar(P.pagar, porPgto), "Despesa", "porPgto");
+  // vencimento no período: janela própria (sem a janela ampla)
+  for (const [caminho, tipo] of [[P.receber, "Receita"], [P.pagar, "Despesa"]]) {
+    try { juntar(await paginar(token, caminho, porVenc), tipo, "porVenc"); } catch (e) { avisos.push(`Em aberto (${tipo === "Receita" ? "a receber" : "a pagar"}): ${e.message}`); }
+  }
 
   // contas financeiras e saldo atual (para reconstruir o saldo no início do período)
   let contas = [];
@@ -236,23 +243,9 @@ async function etapaLista(token, clienteId, de, ate) {
     });
   } catch (e) { avisos.push("Contas financeiras: " + e.message); }
 
-  let transferencias = [];
-  try {
-    transferencias = (await paginar(token, P.transferencias, { data_inicio: ini, data_fim: hoje }, 100)).map((t) => ({
-      data: (t.origem && t.origem.data) || t.data, valor: num(t.valor),
-      origem: (t.origem && t.origem.conta_financeira && t.origem.conta_financeira.nome) || "",
-      destino: (t.destino && t.destino.conta_financeira && t.destino.conta_financeira.nome) || ""
-    }));
-  } catch (e) { avisos.push("Transferências: " + e.message); }
-
-  let vendas = [];
-  try {
-    vendas = (await paginar(token, P.vendas, { data_inicio: ini, data_fim: fim }, 100)).map((v) => ({
-      id: v.id, data: v.data, numero: String(v.numero ?? ""), total: num(v.total), tipo: v.tipo || v.itens || "",
-      situacao: (v.situacao && v.situacao.nome) || "", cliente: (v.cliente && v.cliente.nome) || "", cidade: (v.cliente && (v.cliente.cidade || v.cliente.estado)) || "",
-      alteracao: v.data_alteracao || v.criado_em || ""
-    }));
-  } catch (e) { avisos.push("Vendas: " + e.message); }
+  // Transferências entre contas não são entrada nem saída de caixa (somam zero no consolidado) e
+  // as vendas ficam fora desta sincronização por enquanto (base: Visão Competência + Extrato).
+  const transferencias = [], vendas = [];
 
   // memória de detalhes já consultados: só o que mudou no Conta Azul (data de alteração) precisa ser consultado de novo
   const cache = { parcelas: [], vendas: [] };
@@ -263,7 +256,8 @@ async function etapaLista(token, clienteId, de, ate) {
   } catch { /* sem memória: consulta tudo */ }
 
   const qtd = (t) => [...mapa.values()].filter((p) => p.tipo === t).length;
-  avisos.unshift(`Conta Azul: ${qtd("Receita")} parcelas a receber e ${qtd("Despesa")} a pagar encontradas (competência no período ou pagamento desde ${ini.split("-").reverse().join("/")}), ${contas.length} contas financeiras, ${transferencias.length} transferências e ${vendas.length} vendas.`);
+  const nC = [...mapa.values()].filter((p) => p.porComp).length, nP = [...mapa.values()].filter((p) => p.porPgto).length, nV = [...mapa.values()].filter((p) => p.porVenc).length;
+  avisos.unshift(`Conta Azul (${ini.split("-").reverse().join("/")} a ${fim.split("-").reverse().join("/")}): ${nC} parcela(s) com competência no período, ${nP} com pagamento no período e ${nV} em aberto vencendo no período · ${contas.length} contas financeiras.`);
   if (cache.parcelas.length || cache.vendas.length) avisos.push(`${cache.parcelas.length} parcela(s) e ${cache.vendas.length} venda(s) sem alteração desde a última busca: detalhes reaproveitados.`);
   return { periodo: { de, ate, ini, fim, hoje }, parcelas: [...mapa.values()], contas, transferencias, vendas, cache, avisos };
 }

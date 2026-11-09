@@ -48,7 +48,7 @@ app.http("premissas", {
     await exigirAcessoCliente(req, clienteId);
     if (!mensagem || String(mensagem).length > 2000) throw httpErro(400, "Mensagem inválida");
     const d = await dadosDe(clienteId);
-    const meses = [...new Set(d.lancamentos.filter((l) => l.status === "Realizado").map((l) => l.competencia))].sort();
+    const meses = [...new Set(d.lancamentos.filter((l) => (l.visao ? l.visao === "Competência" : l.status === "Realizado")).map((l) => l.competencia))].sort();
     const clientes = Object.entries(d.vendas.reduce((o, v) => ((o[v.cliente] = (o[v.cliente] || 0) + v.valorTotal), o), {}))
       .sort((a, b) => b[1] - a[1]).slice(0, 80).map(([n]) => n);
     const system = `Você ajusta as PREMISSAS de um modelo de projeção financeira a pedido do usuário.
