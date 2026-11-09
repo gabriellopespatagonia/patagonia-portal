@@ -8,7 +8,11 @@
 //                                                       transferências e vendas
 //        { clienteId, etapa: "detalhes", parcelas: [ids], vendas: [ids] }
 //                                                    → baixas (data de caixa, conta, juros/multa/desconto/taxa),
-//                                                       rateio por categoria e centro de custo, itens das vendas
+//                                                       rateio por categoria e centro de custo, itens das vendas.
+//                                                       Cada chamada usa no máximo ~25 s; o que faltar volta em
+//                                                       pendentes*, e "esperar" indica o limite de chamadas atingido.
+//        { clienteId, etapa: "cache", parcelas: [{id, alt, d}], vendas: [{id, alt, itens}] }
+//                                                    → memória dos detalhes no SharePoint (só o que mudou é consultado de novo)
 //   POST /api/contaazul/desconectar { clienteId }
 //
 // Endereços e campos conferidos na especificação OpenAPI oficial (developers.contaazul.com, nov/2026):
@@ -39,6 +43,7 @@ const P = {
   itensVenda: (id) => `/v1/venda/${encodeURIComponent(id)}/itens`
 };
 const arqTokens = (id) => `Clientes/${id}/config/contaazul.json`;
+const arqCache = (id) => `Clientes/${id}/config/contaazul-detalhes.json`;
 const segredoState = () => process.env.CONTAAZUL_STATE_SECRET || process.env.CONTAAZUL_CLIENT_SECRET || "";
 
 function assinar(obj) {
@@ -86,7 +91,12 @@ async function chamar(token, caminho, params = {}) {
   const url = `${CFG().api}${caminho}${Object.keys(params).length ? "?" + query(params) : ""}`;
   for (let tentativa = 0; ; tentativa++) {
     const r = await fetch(url, { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } });
-    if (r.status === 429 && tentativa < 4) { await espera((Number(r.headers.get("retry-after")) || 1.5 * (tentativa + 1)) * 1000); continue; }
+    if (r.status === 429) {
+      const ra = Number(r.headers.get("retry-after")) || 2 * (tentativa + 1);
+      // espera curta aqui; espera longa fica com o navegador (a função tem tempo-limite de 45 s)
+      if (ra <= 3 && tentativa < 2) { await espera(ra * 1000); continue; }
+      const e = new Error("Limite de chamadas do Conta Azul atingido"); e.status = 429; e.esperar = Math.max(ra, 10); throw e;
+    }
     if (!r.ok) { const e = new Error(`Conta Azul ${caminho}: ${r.status} ${(await r.text()).slice(0, 300)}`); e.status = r.status; throw e; }
     return r.status === 204 ? null : r.json();
   }
@@ -102,11 +112,12 @@ async function paginar(token, caminho, params, tam = 500) {
   }
   return itens;
 }
-/** Executa tarefas com no máximo `n` em paralelo, espaçadas para não estourar o limite por segundo. */
-async function emLotes(itens, n, fn) {
+/** Executa tarefas com no máximo `n` em paralelo, espaçadas para não estourar o limite por segundo.
+ *  `parar()` permite interromper (tempo-limite ou limite de chamadas): itens não iniciados ficam `undefined`. */
+async function emLotes(itens, n, fn, parar = () => false, pausa = 120) {
   const out = new Array(itens.length); let i = 0;
   await Promise.all(Array.from({ length: Math.min(n, itens.length) }, async () => {
-    while (i < itens.length) { const k = i++; out[k] = await fn(itens[k]); await espera(120); }
+    while (i < itens.length && !parar()) { const k = i++; out[k] = await fn(itens[k]); await espera(pausa); }
   }));
   return out;
 }
@@ -123,7 +134,8 @@ const resumoParcela = (x, tipo) => ({
   status: x.status_traduzido || x.status || "", total: num(x.total), pago: num(x.pago), naoPago: num(x.nao_pago),
   categorias: (x.categorias || []).map((c) => c.nome).filter(Boolean),
   centros: (x.centros_custo || []).map((c) => c.nome).filter(Boolean),
-  contraparte: (x.cliente || x.fornecedor || {}).nome || ""
+  contraparte: (x.cliente || x.fornecedor || {}).nome || "",
+  alteracao: x.data_alteracao || x.data_criacao || ""
 });
 const detalheParcela = (d) => ({
   id: d.id, status: d.status || "", competencia: (d.evento && d.evento.data_competencia) || null,
@@ -191,7 +203,7 @@ app.http("contaazulDesconectar", {
   })
 });
 
-async function etapaLista(token, de, ate) {
+async function etapaLista(token, clienteId, de, ate) {
   const avisos = [];
   const ini = `${de}-01`, fim = ultimoDia(ate), hoje = hojeBR();
   // A busca exige uma janela de vencimento: usamos uma janela ampla e filtramos por competência e por pagamento.
@@ -237,26 +249,57 @@ async function etapaLista(token, de, ate) {
   try {
     vendas = (await paginar(token, P.vendas, { data_inicio: ini, data_fim: fim }, 100)).map((v) => ({
       id: v.id, data: v.data, numero: String(v.numero ?? ""), total: num(v.total), tipo: v.tipo || v.itens || "",
-      situacao: (v.situacao && v.situacao.nome) || "", cliente: (v.cliente && v.cliente.nome) || "", cidade: (v.cliente && (v.cliente.cidade || v.cliente.estado)) || ""
+      situacao: (v.situacao && v.situacao.nome) || "", cliente: (v.cliente && v.cliente.nome) || "", cidade: (v.cliente && (v.cliente.cidade || v.cliente.estado)) || "",
+      alteracao: v.data_alteracao || v.criado_em || ""
     }));
   } catch (e) { avisos.push("Vendas: " + e.message); }
 
-  avisos.unshift(`Conta Azul: ${recC.length + recP.length} parcelas a receber e ${pagC.length + pagP.length} a pagar encontradas (competência no período ou pagamento desde ${ini.split("-").reverse().join("/")}), ${contas.length} contas financeiras, ${transferencias.length} transferências e ${vendas.length} vendas.`);
-  return { periodo: { de, ate, ini, fim, hoje }, parcelas: [...mapa.values()], contas, transferencias, vendas, avisos };
+  // memória de detalhes já consultados: só o que mudou no Conta Azul (data de alteração) precisa ser consultado de novo
+  const cache = { parcelas: [], vendas: [] };
+  try {
+    const mem = (await sp.lerJson(arqCache(clienteId))) || {};
+    mapa.forEach((p) => { const c = mem.parcelas && mem.parcelas[p.id]; if (c && c.alt && c.alt === p.alteracao) cache.parcelas.push(c.d); });
+    vendas.forEach((v) => { const c = mem.vendas && mem.vendas[v.id]; if (c && c.alt && c.alt === v.alteracao) cache.vendas.push({ id: v.id, itens: c.itens }); });
+  } catch { /* sem memória: consulta tudo */ }
+
+  const qtd = (t) => [...mapa.values()].filter((p) => p.tipo === t).length;
+  avisos.unshift(`Conta Azul: ${qtd("Receita")} parcelas a receber e ${qtd("Despesa")} a pagar encontradas (competência no período ou pagamento desde ${ini.split("-").reverse().join("/")}), ${contas.length} contas financeiras, ${transferencias.length} transferências e ${vendas.length} vendas.`);
+  if (cache.parcelas.length || cache.vendas.length) avisos.push(`${cache.parcelas.length} parcela(s) e ${cache.vendas.length} venda(s) sem alteração desde a última busca: detalhes reaproveitados.`);
+  return { periodo: { de, ate, ini, fim, hoje }, parcelas: [...mapa.values()], contas, transferencias, vendas, cache, avisos };
 }
 
+/** Detalha parcelas e itens de vendas dentro de um orçamento de tempo (~25 s); o que não couber volta como pendente. */
 async function etapaDetalhes(token, idsParcelas, idsVendas) {
-  const falhas = [];
-  const parcelas = (await emLotes(idsParcelas, 5, async (id) => {
-    try { return detalheParcela(await chamar(token, P.parcela(id))); } catch (e) { falhas.push(`parcela ${id}: ${e.message}`); return null; }
-  })).filter(Boolean);
-  const vendas = (await emLotes(idsVendas, 5, async (id) => {
-    try {
-      const itens = await paginar(token, P.itensVenda(id), {}, 100);
-      return { id, itens: itens.map((i) => ({ nome: i.nome || i.descricao || "Item", tipo: i.tipo || "", quantidade: num(i.quantidade) || 1, valor: num(i.valor) })) };
-    } catch (e) { falhas.push(`venda ${id}: ${e.message}`); return null; }
-  })).filter(Boolean);
-  return { parcelas, vendas, falhas: falhas.slice(0, 20), totalFalhas: falhas.length };
+  const inicio = Date.now(), ORCAMENTO = 25_000, falhas = [];
+  let esperar = 0;
+  const parar = () => esperar > 0 || Date.now() - inicio > ORCAMENTO;
+  const tentar = async (rotulo, fn) => {
+    try { return await fn(); }
+    catch (e) { if (e.status === 429) { esperar = Math.max(esperar, e.esperar || 30); return undefined; } falhas.push(`${rotulo}: ${e.message}`); return null; }
+  };
+  const rp = await emLotes(idsParcelas, 4, (id) => tentar(`parcela ${id}`, async () => detalheParcela(await chamar(token, P.parcela(id)))), parar, 250);
+  const rv = await emLotes(idsVendas, 4, (id) => tentar(`venda ${id}`, async () => {
+    const itens = await paginar(token, P.itensVenda(id), {}, 100);
+    return { id, itens: itens.map((i) => ({ nome: i.nome || i.descricao || "Item", tipo: i.tipo || "", quantidade: num(i.quantidade) || 1, valor: num(i.valor) })) };
+  }), parar, 250);
+  // undefined = não processado (tempo ou limite) → pendente; null = falhou de vez
+  return {
+    parcelas: rp.filter(Boolean), vendas: rv.filter(Boolean),
+    pendentesParcelas: idsParcelas.filter((_, k) => rp[k] === undefined),
+    pendentesVendas: idsVendas.filter((_, k) => rv[k] === undefined),
+    esperar, falhas: falhas.slice(0, 20), totalFalhas: falhas.length
+  };
+}
+
+/** Grava na memória do cliente os detalhes consultados (chave: id + data de alteração no Conta Azul). */
+async function etapaCache(clienteId, parcelas, vendas) {
+  const mem = (await sp.lerJson(arqCache(clienteId))) || { parcelas: {}, vendas: {} };
+  mem.parcelas = mem.parcelas || {}; mem.vendas = mem.vendas || {};
+  (parcelas || []).forEach((x) => { if (x && x.id && x.alt && x.d) mem.parcelas[x.id] = { alt: x.alt, d: x.d }; });
+  (vendas || []).forEach((x) => { if (x && x.id && x.alt && x.itens) mem.vendas[x.id] = { alt: x.alt, itens: x.itens }; });
+  mem.atualizadoEm = new Date().toISOString();
+  await sp.gravarJson(arqCache(clienteId), mem);
+  return { ok: true, parcelas: Object.keys(mem.parcelas).length, vendas: Object.keys(mem.vendas).length };
 }
 
 app.http("contaazulSincronizar", {
@@ -265,6 +308,7 @@ app.http("contaazulSincronizar", {
     await exigirConsultor(req);
     const corpo = await req.json();
     const { clienteId, etapa } = corpo; await exigirAcessoCliente(req, clienteId);
+    if (etapa === "cache") return etapaCache(clienteId, corpo.parcelas, corpo.vendas);
     const token = await tokenValido(clienteId);
     if (etapa === "detalhes") {
       const ids = (a) => (Array.isArray(a) ? a.filter((x) => typeof x === "string").slice(0, 80) : []);
@@ -272,6 +316,6 @@ app.http("contaazulSincronizar", {
     }
     const { de, ate } = corpo;
     if (!/^\d{4}-\d{2}$/.test(de) || !/^\d{4}-\d{2}$/.test(ate) || de > ate) throw httpErro(400, "Período inválido");
-    return etapaLista(token, de, ate);
+    return etapaLista(token, clienteId, de, ate);
   })
 });

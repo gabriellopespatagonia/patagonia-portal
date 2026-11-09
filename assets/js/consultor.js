@@ -502,17 +502,42 @@
       // 1) lista de parcelas, contas, transferências e vendas
       const lista = await PB.api.post("/contaazul/sincronizar", { clienteId, de, ate, etapa: "lista" });
       (lista.avisos || []).forEach((a) => log("• " + a));
-      // 2) detalhes: baixas (data de caixa e conta) de tudo que teve pagamento e rateio das parcelas com mais de uma categoria
-      const idsP = lista.parcelas.filter((p) => p.pago > 0 || p.categorias.length > 1 || p.centros.length > 1).map((p) => p.id);
-      const idsV = lista.vendas.filter((v) => !/CANCEL|ORCAMENTO|ORÇAMENTO|RECUSAD|ESPERANDO/i.test(v.situacao)).map((v) => v.id);
-      const det = { parcelas: [], vendas: [], falhas: [], totalFalhas: 0 };
-      const LOTE = 40, total = idsP.length + idsV.length;
-      for (let i = 0; i < total; i += LOTE) {
-        const fatia = [...idsP, ...idsV.map((id) => "v:" + id)].slice(i, i + LOTE);
-        log(`Detalhando pagamentos e itens… ${Math.min(i + LOTE, total)} de ${total}`);
-        const r = await PB.api.post("/contaazul/sincronizar", { clienteId, etapa: "detalhes", parcelas: fatia.filter((x) => !x.startsWith("v:")), vendas: fatia.filter((x) => x.startsWith("v:")).map((x) => x.slice(2)) });
+      // 2) detalhes: baixas (data de caixa e conta) de tudo que teve pagamento e rateio das parcelas com mais de uma categoria.
+      //    O que não mudou desde a última busca vem da memória (lista.cache); o resto é consultado em lotes curtos.
+      const altP = new Map(lista.parcelas.map((p) => [p.id, p.alteracao])), altV = new Map(lista.vendas.map((v) => [v.id, v.alteracao]));
+      const det = { parcelas: [...(lista.cache?.parcelas || [])], vendas: [...(lista.cache?.vendas || [])], falhas: [], totalFalhas: 0 };
+      const temP = new Set(det.parcelas.map((d) => d.id)), temV = new Set(det.vendas.map((v) => v.id));
+      const filaP = lista.parcelas.filter((p) => (p.pago > 0 || p.categorias.length > 1 || p.centros.length > 1) && !temP.has(p.id)).map((p) => p.id);
+      const filaV = lista.vendas.filter((v) => !/CANCEL|ORCAMENTO|ORÇAMENTO|RECUSAD|ESPERANDO/i.test(v.situacao) && !temV.has(v.id)).map((v) => v.id);
+      const total = filaP.length + filaV.length; let feitos = 0, lote = 40, falhasSeguidas = 0, novosP = [], novosV = [];
+      const dormir = (s) => new Promise((ok) => setTimeout(ok, s * 1000));
+      const gravarMemoria = async () => {
+        if (!novosP.length && !novosV.length) return;
+        const p = novosP, v = novosV; novosP = []; novosV = [];
+        try { await PB.api.post("/contaazul/sincronizar", { clienteId, etapa: "cache", parcelas: p, vendas: v }); } catch { novosP.push(...p); novosV.push(...v); }
+      };
+      if (total) log(`Detalhando ${total} pagamento(s)/venda(s) novos ou alterados (o Conta Azul permite cerca de 600 consultas por minuto)…`);
+      let passo = 0;
+      while (filaP.length || filaV.length) {
+        const ps = filaP.splice(0, lote), vs = filaV.splice(0, Math.max(0, lote - ps.length));
+        let r;
+        try { r = await PB.api.post("/contaazul/sincronizar", { clienteId, etapa: "detalhes", parcelas: ps, vendas: vs }); falhasSeguidas = 0; }
+        catch (err) {
+          // falha de rede/tempo: devolve à fila, reduz o lote e tenta de novo (até 4 vezes seguidas)
+          filaP.unshift(...ps); filaV.unshift(...vs);
+          if (++falhasSeguidas > 4) { await gravarMemoria(); throw new Error(`a busca parou após várias falhas (${err.message}). Os detalhes já obtidos ficaram salvos; clique em buscar de novo para continuar.`); }
+          lote = Math.max(10, Math.floor(lote / 2)); log(`Falha temporária (${err.message}). Tentando de novo com lotes de ${lote}…`); await dormir(5); continue;
+        }
         det.parcelas.push(...r.parcelas); det.vendas.push(...r.vendas); det.falhas.push(...r.falhas); det.totalFalhas += r.totalFalhas;
+        r.parcelas.forEach((d) => novosP.push({ id: d.id, alt: altP.get(d.id), d }));
+        r.vendas.forEach((v) => novosV.push({ id: v.id, alt: altV.get(v.id), itens: v.itens }));
+        filaP.unshift(...r.pendentesParcelas); filaV.unshift(...r.pendentesVendas);
+        feitos = total - filaP.length - filaV.length;
+        log(`Detalhando pagamentos e itens… ${feitos} de ${total}`);
+        if (++passo % 5 === 0) await gravarMemoria();
+        if (r.esperar) { await gravarMemoria(); log(`Limite de consultas do Conta Azul atingido — aguardando ${r.esperar} s para continuar…`); await dormir(r.esperar); }
       }
+      await gravarMemoria();
       // 3) monta o extrato no modelo padrão
       const m = IMP.montarContaAzulAPI(lista, det);
       m.avisos.forEach((a) => log("• " + a));
