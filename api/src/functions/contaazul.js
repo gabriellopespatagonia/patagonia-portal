@@ -16,8 +16,9 @@ const CFG = () => ({
   clientId: process.env.CONTAAZUL_CLIENT_ID,
   clientSecret: process.env.CONTAAZUL_CLIENT_SECRET,
   redirect: process.env.CONTAAZUL_REDIRECT_URI, // ex.: https://www.patagoniabusiness.com.br/api/contaazul/callback
-  authUrl: process.env.CONTAAZUL_AUTH_URL || "https://auth.contaazul.com/login",
-  tokenUrl: process.env.CONTAAZUL_TOKEN_URL || "https://auth.contaazul.com/oauth2/token",
+  // Conferidos no Portal do Desenvolvedor (nov/2026): a tela de login usa rota com "#"
+  authUrl: process.env.CONTAAZUL_AUTH_URL || "https://login.contaazul.com/#/oauth/authorize",
+  tokenUrl: process.env.CONTAAZUL_TOKEN_URL || "https://api-v2.contaazul.com/oauth/token",
   scope: process.env.CONTAAZUL_SCOPE || "openid profile aws.cognito.signin.user.admin",
   api: process.env.CONTAAZUL_API_URL || "https://api-v2.contaazul.com",
   pathReceber: process.env.CONTAAZUL_PATH_RECEBER || "/v1/financeiro/eventos-financeiros/contas-a-receber/buscar",
