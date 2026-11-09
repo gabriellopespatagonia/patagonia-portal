@@ -199,7 +199,7 @@
       try {
         const r = await fetch(CFG.apiBase + "/perfil", { credentials: "include" });
         if (r.status === 401) return null;
-        if (r.status === 403) return { semCadastro: true };
+        if (r.status === 403) { const j = await r.json().catch(() => ({})); return { semCadastro: true, email: j.email || "" }; }
         if (!r.ok) return null;
         return await r.json();
       } catch { return null; }
@@ -237,7 +237,7 @@
     },
     async exigir(papel) {
       const u = await PB.auth.usuario();
-      if (u && u.semCadastro) { location.replace(PB.raiz() + "login.html?erro=403"); return null; }
+      if (u && u.semCadastro) { try { sessionStorage.setItem("pb_email_negado", u.email || ""); } catch { } location.replace(PB.raiz() + "login.html?erro=403"); return null; }
       if (!u ||(papel && u.papel !== papel && u.papel !== "consultor")) {
         location.replace(PB.raiz() + "login.html?destino=" + papel);
         return null;

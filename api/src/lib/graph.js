@@ -105,4 +105,16 @@ async function enviarEmail({ para, assunto, html }) {
   if (!r.ok) throw new Error(`Falha ao enviar e-mail: ${r.status} ${await r.text()}`);
 }
 
-module.exports = { lerJson, baixar, gravar, gravarJson, listar, enviarEmail };
+/** Todos os endereços de um usuário do Microsoft 365 (principal, aliases e e-mails alternativos), em minúsculas.
+ *  Usado para reconhecer o mesmo usuário após troca de domínio. Sem permissão de leitura de usuários, devolve []. */
+async function enderecosDoUsuario(email) {
+  try {
+    const r = await graph(`/users/${encodeURIComponent(email)}?$select=mail,userPrincipalName,proxyAddresses,otherMails`);
+    if (!r.ok) return [];
+    const u = await r.json();
+    return [...new Set([u.mail, u.userPrincipalName, ...(u.otherMails || []), ...(u.proxyAddresses || []).map((p) => String(p).replace(/^smtp:/i, ""))]
+      .filter(Boolean).map((x) => String(x).toLowerCase()))];
+  } catch { return []; }
+}
+
+module.exports = { lerJson, baixar, gravar, gravarJson, listar, enviarEmail, enderecosDoUsuario };

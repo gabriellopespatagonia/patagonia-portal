@@ -8,10 +8,11 @@
 // O usuário pode estar logado de duas formas:
 //   1. conta Microsoft (login do Azure Static Web Apps — cabeçalho x-ms-client-principal);
 //   2. código por e-mail (cookie de sessão assinado — ver lib/sessao.js).
-const { lerJson } = require("./graph");
+const { lerJson, enderecosDoUsuario } = require("./graph");
 const { emailDaSessao } = require("./sessao");
 
 let cache = { usuarios: null, em: 0 };
+const cacheAliases = new Map(); // e-mail → { lista, em }
 
 /** E-mail do usuário logado (Microsoft ou código por e-mail), ou null. */
 function emailLogado(request) {
@@ -41,8 +42,14 @@ async function usuarios() {
 async function perfil(request) {
   const email = emailLogado(request);
   if (!email) throw httpErro(401, "Não autenticado");
-  const u = await usuarioCadastrado(email);
-  if (!u) throw httpErro(403, "Usuário não cadastrado no portal");
+  let u = await usuarioCadastrado(email);
+  if (!u && /@/.test(email)) {
+    // mesmo usuário com outro endereço (ex.: troca de domínio no Microsoft 365): procura pelos aliases
+    let c = cacheAliases.get(email);
+    if (!c || Date.now() - c.em > 10 * 60_000) { c = { lista: await enderecosDoUsuario(email), em: Date.now() }; cacheAliases.set(email, c); }
+    for (const outro of c.lista) { if (outro !== email && (u = await usuarioCadastrado(outro))) break; }
+  }
+  if (!u) { const e = httpErro(403, "Usuário não cadastrado no portal"); e.email = email; throw e; }
   return { ...u, email };
 }
 

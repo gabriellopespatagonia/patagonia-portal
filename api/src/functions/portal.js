@@ -11,7 +11,14 @@ const nomeSeguro = (n) => String(n || "").replace(/[\\/:*?"<>|#%]/g, "_").slice(
 // GET /api/perfil → dados do usuário logado
 app.http("perfil", {
   methods: ["GET"], authLevel: "anonymous", route: "perfil",
-  handler: rota(async (req) => { const u = await perfil(req); return { email: u.email, nome: u.nome, papel: u.papel, clienteId: u.clienteId, iaAtiva: iaAtiva() }; })
+  handler: async (req, context) => {
+    try { const u = await perfil(req); return { status: 200, jsonBody: { email: u.email, nome: u.nome, papel: u.papel, clienteId: u.clienteId, iaAtiva: iaAtiva() } }; }
+    catch (e) {
+      if (!e.status) { context.error(e); return { status: 500, body: "Erro interno" }; }
+      // 403: informa qual e-mail chegou do login, para o usuário saber o que cadastrar
+      return { status: e.status, jsonBody: { erro: e.message, email: e.email || null } };
+    }
+  }
 });
 
 // GET/POST/PATCH /api/clientes

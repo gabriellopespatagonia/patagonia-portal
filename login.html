@@ -156,7 +156,11 @@
   document.getElementById("btn-ms").addEventListener("click", () => PB.auth.loginMicrosoft("/" + destino()));
 
   setPapel(papel);
-  if (params.get("erro") === "403") alerta("Seu usuário não tem permissão para esta área.", "error");
+  if (params.get("erro") === "403") {
+    let negado = ""; try { negado = sessionStorage.getItem("pb_email_negado") || ""; } catch { }
+    alerta(`${negado ? `O e-mail <b>${PB.esc(negado)}</b> não está cadastrado no portal.` : "Seu usuário não tem permissão para esta área."} Se você entrou com outra conta, <button type="button" class="link-btn" id="btn-trocar-conta">saia e entre novamente</button>; se o e-mail estiver certo, peça o cadastro à Patagonia Business.`, "error");
+    document.getElementById("btn-trocar-conta")?.addEventListener("click", () => PB.auth.sair());
+  }
 })();
 </script>
 </body>
