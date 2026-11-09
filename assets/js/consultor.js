@@ -48,7 +48,134 @@
     if (viewAtual === "plano") renderPlano();
     if (viewAtual === "modelos") renderDicionario();
     if (viewAtual === "sharepoint") UI.documentos($("docs"), clienteId);
+    if (viewAtual === "relatorios") renderRelatorios();
+    if (viewAtual === "conferencia") renderConferencia();
   }
+
+  /* ---------- Relatórios do cliente: o mesmo painel do cliente, embutido ---------- */
+  function renderRelatorios() {
+    const fr = $("frame-cliente"), url = `../cliente/index.html?cliente=${encodeURIComponent(clienteId)}&embed=1#geral`;
+    if (fr.dataset.cliente !== clienteId) { fr.dataset.cliente = clienteId; fr.src = url; }
+  }
+  const abrirRelatorios = (id) => { if (id) { clienteId = id; $("sel-cliente").value = id; } document.querySelector('.side-link[data-view="relatorios"]').click(); };
+
+  /* ---------- Conferência da DRE com o Conta Azul ---------- */
+  const estruturas = {}; // por cliente: { linhas } ou { erro }
+  let estruturaCA = null, mapaCA = new Map(), confSeletor = null;
+  const nomeSemCodigo = (s) => String(s || "").replace(/^\s*\d[\d.]*\s*[-–]\s*/, "");
+  const codigoDe = (s) => (/^\s*(\d[\d.]*)\s*[-–]/.exec(String(s || "")) || [])[1] || "";
+  async function carregarEstruturaCA(forcar) {
+    if (!forcar && estruturas[clienteId]) estruturaCA = estruturas[clienteId];
+    else if (PB.isDemo()) estruturaCA = estruturas[clienteId] = { erro: "Modo demonstração: a estrutura da DRE do Conta Azul vem da integração." };
+    else if (base.cliente.origem !== "contaazul") estruturaCA = estruturas[clienteId] = { erro: "Cliente sem Conta Azul: a conferência usa a sugestão pelo nome das categorias." };
+    else {
+      try { estruturaCA = estruturas[clienteId] = await PB.api.get(`/contaazul/dre?cliente=${encodeURIComponent(clienteId)}`); }
+      catch (e) { estruturaCA = estruturas[clienteId] = { erro: "Não foi possível ler a DRE do Conta Azul (" + e.message.slice(0, 140) + "). Conecte o cliente em Importar e publicar → Integração Conta Azul." }; }
+    }
+    mapaCA = new Map();
+    (estruturaCA.linhas || []).forEach((li) => li.categorias.forEach((c) => { if (c.nome) mapaCA.set("n:" + PB.E.norm(nomeSemCodigo(c.nome)), li); if (c.codigo) mapaCA.set("c:" + c.codigo, li); }));
+  }
+  const linhaCAObj = (cat) => mapaCA.get("n:" + PB.E.norm(nomeSemCodigo(cat))) || (codigoDe(cat) && mapaCA.get("c:" + codigoDe(cat))) || null;
+  const linhaCA = (cat) => (linhaCAObj(cat) || {}).descricao || "";
+  const grupoDRE = (nomeLinha) => { const n = PB.E.DRE.find((x) => x.nome === nomeLinha); return n ? (n.tipo === "linha" ? n.pai : n.id) : null; };
+
+  async function renderConferencia(forcar) {
+    if (!confSeletor) confSeletor = UI.seletorPeriodo($("conf-periodo"), { chave: "pb_conf_periodo", aoMudar: () => renderConferencia() });
+    confSeletor.atualizar(PB.mesesDisponiveis(base));
+    const meses = confSeletor.meses();
+    $("conf-status").innerHTML = `<p class="muted">Carregando a estrutura da DRE do Conta Azul…</p>`;
+    await carregarEstruturaCA(forcar === true);
+    const temCA = !!(estruturaCA.linhas && estruturaCA.linhas.length);
+    const L = base.lancamentos.filter((l) => PB.naDRE(l) && meses.includes(l.competencia));
+    const semVisao = L.filter((l) => !l.visao).length;
+    // valores por categoria (receita +, despesa −)
+    const cats = new Map();
+    L.forEach((l) => { const c = cats.get(l.categoria) || { cat: l.categoria, valor: 0, rec: 0, desp: 0 }; const v = l.tipo === "Receita" ? l.valor : -l.valor; c.valor += v; if (v >= 0) c.rec += v; else c.desp -= v; cats.set(l.categoria, c); });
+    const lista = [...cats.values()].map((c) => {
+      const tipo = c.rec >= c.desp ? "Receita" : "Despesa", li = linhaCAObj(c.cat), conta = PB.contaDe(base, c.cat);
+      const sug = PB.sugestaoDRE(li ? li.descricao : "", c.cat, tipo);
+      const atual = conta ? conta.refDRE || "" : "";
+      return { ...c, tipo, li, conta, atual, sug, sugDFC: conta && conta.refDFC && atual === sug ? conta.refDFC : PB.sugestaoDFC(sug, tipo), ok: atual && atual === sug };
+    }).sort((a, b) => Math.abs(b.valor) - Math.abs(a.valor));
+    const st = [];
+    st.push(temCA ? `<div class="alert alert-info">Estrutura da DRE do Conta Azul carregada: ${estruturaCA.linhas.length} linhas. Período: ${meses.length ? (meses.length === 1 ? f.mes(meses[0]) : f.mes(meses[0]) + " a " + f.mes(meses.at(-1))) : "—"}.</div>` : `<div class="alert alert-warn">${PB.esc(estruturaCA.erro || "Estrutura do Conta Azul indisponível.")}</div>`);
+    if (semVisao) st.push(`<div class="alert alert-warn">${semVisao} lançamento(s) do período vieram de importações antigas (sem visão de competência). Importe a <b>Visão Competência</b> do Conta Azul destes meses para a conferência ficar exata.</div>`);
+    const divergentes = lista.filter((x) => !x.ok).length;
+    st.push(`<p style="margin:8px 0 0"><span class="badge ${divergentes ? "badge-warn" : "badge-ok"}">${divergentes} categoria(s) divergentes ou sem classificação</span> <span class="badge badge-info">${lista.length} categoria(s) com valor no período</span></p>`);
+    $("conf-status").innerHTML = st.join("");
+
+    // DRE do portal e grupos comparáveis
+    const dre = PB.calc.dre(base, meses), soma = (id) => PB.soma(dre.valor(id) || [], (x) => x);
+    const grupoCA = {};
+    lista.forEach((x) => { const g = grupoDRE(PB.sugestaoDRE(x.li ? x.li.descricao : "", x.cat, x.tipo)); grupoCA[g] = (grupoCA[g] || 0) + x.valor; });
+    const gc = (...ids) => ids.reduce((s, id) => s + (grupoCA[id] || 0), 0);
+    const totalCA = PB.soma(lista.filter((x) => !temCA || x.li), (x) => x.valor);
+    const linhasResumo = [
+      ["Faturamento (Receita Bruta)", gc("RB"), soma("RB")],
+      ["(−) Deduções da Receita Bruta", gc("DED"), soma("DED")],
+      ["(=) Receita Líquida", gc("RB", "DED"), soma("RL")],
+      ["(−) Custos Variáveis", gc("CV"), soma("CV")],
+      ["(−) Despesas Variáveis e Fixas", gc("DV", "DF", "EBITDA"), soma("DV") + soma("DF") + PB.soma(dre.valor("EBITDA:Depreciação e Amortização") || [], (x) => x)],
+      ["(+/−) Resultado Não Operacional", gc("RNO"), soma("RNO")],
+      ["(+/−) Resultado Financeiro", gc("RF"), soma("RF")],
+      ["(−) Impostos sobre o lucro e participações", gc("RAIR"), soma("RLIQ") - soma("RAIR")],
+      [temCA ? "(=) Resultado (todas as categorias da DRE do Conta Azul)" : "(=) Resultado (todas as categorias)", totalCA, soma("RLIQ")]
+    ];
+    $("conf-resumo").innerHTML = `<div class="table-wrap"><table class="data"><thead><tr><th style="text-align:left">Linha</th><th>${temCA ? "Conta Azul" : "Pela categoria"}</th><th>Portal</th><th>Diferença</th><th></th></tr></thead><tbody>${
+      linhasResumo.map(([n, a, b]) => { const d = Math.round((b - a) * 100) / 100; return `<tr><td style="text-align:left">${n}</td><td>${f.moeda(a)}</td><td>${f.moeda(b)}</td><td class="${Math.abs(d) >= 0.01 ? "neg" : ""}">${f.moeda(d)}</td><td>${Math.abs(d) < 0.01 ? '<span class="badge badge-ok">confere</span>' : '<span class="badge badge-warn">diferente</span>'}</td></tr>`; }).join("")
+    }</tbody></table></div><p class="muted" style="font-size:12px;margin-top:8px">Distribuição de lucros e categorias marcadas como “Não compõe a DRE” ficam fora do resultado do portal.</p>`;
+
+    // DRE do Conta Azul reproduzida
+    if (temCA) {
+      const porLinha = new Map(); lista.forEach((x) => { if (x.li) porLinha.set(x.li.id, (porLinha.get(x.li.id) || 0) + x.valor); });
+      const filhos = (id) => estruturaCA.linhas.filter((y) => y.pai === id);
+      const valorDe = (li) => (porLinha.get(li.id) || 0) + filhos(li.id).reduce((s, y) => s + valorDe(y), 0);
+      let acumulado = 0;
+      const rows = estruturaCA.linhas.map((li) => {
+        let v;
+        if (li.nivel === 0 && li.totalizador && !li.temFilhos) v = acumulado;
+        else { v = valorDe(li); if (li.nivel === 0) acumulado += v; }
+        const nota = li.custoMedio ? ' <span class="badge badge-warn" title="No Conta Azul esta linha usa o custo médio do estoque, que não vem das categorias financeiras">custo médio do estoque</span>' : "";
+        return `<tr class="${li.totalizador ? "res" : li.temFilhos ? "grp" : ""}"><td style="text-align:left;padding-left:${12 + li.nivel * 18}px">${PB.esc((li.codigo ? li.codigo + " " : "") + li.descricao)}${nota}</td><td>${f.moeda(v)}</td></tr>`;
+      });
+      const fora = lista.filter((x) => !x.li);
+      if (fora.length) rows.push(`<tr class="sgrp"><td style="text-align:left">Categorias sem linha na DRE do Conta Azul: ${fora.map((x) => PB.esc(x.cat)).join(", ")}</td><td>${f.moeda(PB.soma(fora, (x) => x.valor))}</td></tr>`);
+      $("conf-dre-ca").innerHTML = `<div class="table-wrap"><table class="data"><thead><tr><th style="text-align:left">Linha da DRE do Conta Azul</th><th>Valor no período</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
+    } else $("conf-dre-ca").innerHTML = `<p class="muted">Disponível para clientes conectados ao Conta Azul pela integração.</p>`;
+
+    // categorias
+    const filtro = $("conf-filtro").value;
+    const vis = lista.filter((x) => !filtro || !x.ok);
+    $("conf-categorias").innerHTML = vis.length ? `<div class="table-wrap"><table class="data left"><thead><tr><th>Categoria</th><th>Valor no período</th><th>Linha no Conta Azul</th><th>Classificação atual (DRE)</th><th>Classificação sugerida (DRE)</th><th>DFC</th></tr></thead><tbody>${
+      vis.map((x) => `<tr data-cat="${PB.esc(x.cat)}" data-tipo="${x.tipo}"><td>${PB.esc(x.cat)}</td><td style="text-align:right">${f.moeda(x.valor)}</td><td>${x.li ? PB.esc(x.li.descricao) : '<span class="muted">—</span>'}</td>
+        <td>${x.atual ? PB.esc(x.atual) : '<span class="badge badge-err">sem classificação</span>'} ${x.ok ? '<span class="badge badge-ok">ok</span>' : x.atual ? '<span class="badge badge-warn">diverge</span>' : ""}</td>
+        <td><select class="d">${opcoesRef("DRE", x.sug)}</select></td><td><select class="f">${opcoesRef("DFC", x.sugDFC)}</select></td></tr>`).join("")
+    }</tbody></table></div>` : `<div class="alert alert-info">Todas as categorias do período estão classificadas como na DRE do Conta Azul.</div>`;
+  }
+  $("conf-filtro").addEventListener("change", () => renderConferencia());
+  $("conf-recarregar").addEventListener("click", () => renderConferencia(true));
+  $("conf-aplicar").addEventListener("click", async () => {
+    const trs = [...document.querySelectorAll("#conf-categorias tr[data-cat]")];
+    if (!trs.length) return alert("Não há categorias para aplicar.");
+    if (!confirm(`Aplicar a classificação de ${trs.length} categoria(s) ao plano de contas de ${base.cliente.nome} e republicar os relatórios?`)) return;
+    const plano = base.planoContas = base.planoContas || [];
+    let seq = plano.filter((c) => String(c.numero).startsWith("99.")).length, criadas = 0, alteradas = 0;
+    trs.forEach((tr) => {
+      const cat = tr.dataset.cat, d = tr.querySelector(".d").value, fx = tr.querySelector(".f").value;
+      if (!d || !fx) return;
+      const conta = PB.contaDe(base, cat);
+      if (conta) { if (conta.refDRE !== d || conta.refDFC !== fx) { conta.refDRE = d; conta.refDFC = fx; alteradas++; } }
+      else {
+        if (!plano.some((c) => c.numero === "99")) plano.push({ numero: "99", nome: "Contas Importadas a Revisar", tipo: "Sintética", refDRE: "", refDFC: "" });
+        plano.push({ numero: `99.${String(++seq).padStart(3, "0")}`, nome: nomeSemCodigo(cat).trim(), tipo: "Analítica", refDRE: d, refDFC: fx }); criadas++;
+      }
+    });
+    const vp = IMP.validarPlano(plano);
+    if (vp.erros.length) return alert("O plano ficou com erros:\n\n• " + vp.erros.slice(0, 10).map((e) => e.msg).join("\n• "));
+    base.planoContas = vp.plano; base.atualizadoEm = new Date().toISOString().slice(0, 19);
+    try { await PB.api.post("/dados", { clienteId, dados: base }); alert(`${alteradas} conta(s) reclassificada(s) e ${criadas} criada(s). Relatórios republicados.`); renderConferencia(); const fr = $("frame-cliente"); fr.dataset.cliente = ""; }
+    catch (e) { alert("Erro ao publicar: " + e.message); }
+  });
 
   /* ---------- Clientes ---------- */
   function renderClientes() {
@@ -61,7 +188,7 @@
         return `${new Date(v).toLocaleDateString("pt-BR")} <span class="badge ${dias > 35 ? "badge-warn" : "badge-ok"}">${dias > 35 ? "desatualizado" : "em dia"}</span>`;
       } },
       { campo: "ultimoFechado", titulo: "Fechamento", fmt: (v, c) => `${v ? "Fechado até " + f.mes(v) : "Nenhum mês fechado"}${(c.mesesAbertos || []).length ? ` <span class="badge badge-warn">${c.mesesAbertos.length} em aberto</span>` : ' <span class="badge badge-ok">em dia</span>'}` },
-      { campo: "id", titulo: "Ações", fmt: (id) => `<button class="btn ${id === clienteId ? "btn-primary" : "btn-outline"} btn-sm" data-acao="ficha" data-id="${id}">Ficha</button> <button class="btn btn-outline btn-sm" data-acao="importar" data-id="${id}">Importar</button> <a class="btn btn-outline btn-sm" href="../cliente/index.html?cliente=${id}#geral">Portal</a>` }
+      { campo: "id", titulo: "Ações", fmt: (id) => `<button class="btn ${id === clienteId ? "btn-primary" : "btn-outline"} btn-sm" data-acao="ficha" data-id="${id}">Ficha</button> <button class="btn btn-outline btn-sm" data-acao="importar" data-id="${id}">Importar</button> <button class="btn btn-outline btn-sm" data-acao="relatorios" data-id="${id}">Relatórios</button>` }
     ], clientes);
     $("tb-clientes").querySelectorAll("[data-acao=ficha]").forEach((b) => b.addEventListener("click", async () => {
       clienteId = b.dataset.id; $("sel-cliente").value = clienteId; await carregarBase(); renderClientes(); renderFicha();
@@ -70,6 +197,9 @@
     $("tb-clientes").querySelectorAll("[data-acao=importar]").forEach((b) => b.addEventListener("click", async () => {
       clienteId = b.dataset.id; $("sel-cliente").value = clienteId; await carregarBase();
       document.querySelector('.side-link[data-view="importar"]').click();
+    }));
+    $("tb-clientes").querySelectorAll("[data-acao=relatorios]").forEach((b) => b.addEventListener("click", async () => {
+      clienteId = b.dataset.id; $("sel-cliente").value = clienteId; await carregarBase(); abrirRelatorios();
     }));
   }
   $("btn-novo").addEventListener("click", () => $("painel-novo").classList.toggle("hidden"));
@@ -135,8 +265,11 @@
       $("pendencias-plano").innerHTML = `<h3 style="font-size:15px;margin-top:18px">Contas novas — aloque na estrutura da DRE e do DFC</h3>
         <p class="muted" style="font-size:13px;margin:0 0 8px">Serão criadas como contas analíticas dentro da conta sintética “99 — Contas Importadas a Revisar”. Depois, ajuste número e posição em <b>Plano de contas</b>.</p>
         <div class="table-wrap"><table class="data left"><thead><tr><th>Conta Analítica</th><th>Referência na Estrutura da DRE</th><th>Referência na Estrutura do DFC</th></tr></thead><tbody>${
-          v.semPlano.map((c) => { const rec = (pendente.lancamentos || []).find((l) => l.categoria === c)?.tipo === "Receita";
-            return `<tr data-cat="${PB.esc(c)}"><td>${PB.esc(c)}</td><td><select class="d">${opcoesRef("DRE", rec ? "Receita Bruta" : "Despesas Administrativas")}</select></td><td><select class="f">${opcoesRef("DFC", rec ? "Receita Bruta" : "Despesas Administrativas")}</select></td></tr>`; }).join("")
+          v.semPlano.map((c) => {
+            // tipo predominante da categoria (pelo valor) e sugestão pela linha da DRE do Conta Azul (se conhecida) e pelo nome
+            const ls = (pendente.lancamentos || []).filter((l) => l.categoria === c), sRec = PB.soma(ls.filter((l) => l.tipo === "Receita"), (l) => l.valor), sDesp = PB.soma(ls.filter((l) => l.tipo === "Despesa"), (l) => l.valor);
+            const tipo = sRec >= sDesp ? "Receita" : "Despesa", sd = PB.sugestaoDRE(linhaCA(c), c, tipo);
+            return `<tr data-cat="${PB.esc(c)}"><td>${PB.esc(c)}</td><td><select class="d">${opcoesRef("DRE", sd)}</select></td><td><select class="f">${opcoesRef("DFC", PB.sugestaoDFC(sd, tipo))}</select></td></tr>`; }).join("")
         }</tbody></table></div><button class="btn btn-dark btn-sm" style="margin-top:10px" id="btn-aplicar-depara">Criar contas e aplicar</button>`;
       $("btn-aplicar-depara").addEventListener("click", () => {
         const plano = pendente.planoContas || (pendente.planoContas = JSON.parse(JSON.stringify(base.planoContas)));
@@ -181,7 +314,7 @@
       await carregarClientes();
     } catch (e) { log("ERRO ao publicar: " + e.message); $("btn-publicar").disabled = false; }
   });
-  $("btn-ver-portal").addEventListener("click", () => window.open(`../cliente/index.html?cliente=${clienteId}#financeiro`, "_blank"));
+  $("btn-ver-portal").addEventListener("click", () => abrirRelatorios());
   const paraBase64 = (file) => new Promise((ok, erro) => { const r = new FileReader(); r.onload = () => ok(r.result.split(",")[1]); r.onerror = erro; r.readAsDataURL(file); });
 
   /* =========================================================

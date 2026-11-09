@@ -39,6 +39,83 @@
     ir(document.querySelector(`.side-link[data-view="${inicial}"]`) ? inicial : links[0].dataset.view);
   };
 
+  /* ---------- Seletor de período (calendário de meses) ----------
+   * Um clique = mês isolado; dois cliques = período (de/até). Atalhos para períodos usuais.
+   * op: { chave (memoriza a escolha), aoMudar(meses) }. Uso: s.atualizar(mesesDisponiveis); s.meses() */
+  const NOMES_MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+  const somaMes = (ym, n) => { const [y, m] = ym.split("-").map(Number); const t = y * 12 + (m - 1) + n; return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`; };
+  UI.somaMes = somaMes;
+  UI.seletorPeriodo = function (el, op = {}) {
+    let disp = [], de = null, ate = null, ano = null, iniSel = null, fimSel = null;
+    const icone = `<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="1.5" y="2.5" width="12" height="11" rx="1.5"/><path d="M1.5 6h12M5 1v3M10 1v3"/></svg>`;
+    el.classList.add("periodo");
+    el.innerHTML = `<button type="button" class="periodo-btn" aria-haspopup="dialog">${icone}<span></span><small>▾</small></button>
+      <div class="periodo-pop hidden" role="dialog" aria-label="Escolher período">
+        <div class="periodo-presets"></div>
+        <div class="periodo-cal"><div class="periodo-ano"><button type="button" data-a="-1" aria-label="Ano anterior">‹</button><span></span><button type="button" data-a="1" aria-label="Próximo ano">›</button></div>
+          <div class="periodo-grid"></div>
+          <div class="periodo-dica">Clique em um mês para vê-lo isolado, ou em dois meses para um período.</div>
+          <div class="periodo-rodape"><span class="periodo-sel"></span><span style="display:flex;gap:6px"><button type="button" class="btn btn-outline btn-sm" data-x="cancelar">Cancelar</button><button type="button" class="btn btn-primary btn-sm" data-x="aplicar">Aplicar</button></span></div>
+        </div></div>`;
+    const btn = el.querySelector(".periodo-btn"), pop = el.querySelector(".periodo-pop");
+    const rotulo = (a, b) => (!a ? "—" : a === b ? f.mes(a) : `${f.mes(a)} a ${f.mes(b)}`);
+    const salvar = () => { if (op.chave) try { localStorage.setItem(op.chave, JSON.stringify({ de, ate })); } catch { } };
+    const ultimo = () => disp.at(-1) || new Date().toISOString().slice(0, 7);
+    const presets = [
+      ["Último mês", () => [ultimo(), ultimo()]],
+      ["Últimos 3 meses", () => [somaMes(ultimo(), -2), ultimo()]],
+      ["Últimos 6 meses", () => [somaMes(ultimo(), -5), ultimo()]],
+      ["Últimos 12 meses", () => [somaMes(ultimo(), -11), ultimo()]],
+      ["Ano corrente", () => [ultimo().slice(0, 4) + "-01", ultimo()]],
+      ["Ano anterior", () => { const y = +ultimo().slice(0, 4) - 1; return [`${y}-01`, `${y}-12`]; }],
+      ["Todo o histórico", () => [disp[0] || ultimo(), ultimo()]]
+    ];
+    el.querySelector(".periodo-presets").innerHTML = presets.map(([n], i) => `<button type="button" data-p="${i}">${n}</button>`).join("");
+    const aplicar = (a, b) => { if (a > b) [a, b] = [b, a]; de = a; ate = b; btn.querySelector("span").textContent = rotulo(de, ate); salvar(); pop.classList.add("hidden"); op.aoMudar && op.aoMudar(api.meses()); };
+    function desenhar() {
+      el.querySelector(".periodo-ano span").textContent = ano;
+      const anos = disp.map((m) => +m.slice(0, 4));
+      el.querySelector('[data-a="-1"]').disabled = anos.length && ano <= Math.min(...anos) - 1;
+      el.querySelector('[data-a="1"]').disabled = anos.length && ano >= Math.max(...anos, new Date().getFullYear());
+      const a = iniSel, b = fimSel || iniSel, lo = a && b ? (a < b ? a : b) : null, hi = a && b ? (a < b ? b : a) : null;
+      el.querySelector(".periodo-grid").innerHTML = NOMES_MES.map((n, i) => {
+        const ym = `${ano}-${String(i + 1).padStart(2, "0")}`;
+        const cls = [!disp.includes(ym) ? "sem-dados" : "", ym === lo || ym === hi ? "ponta" : lo && ym > lo && ym < hi ? "no-intervalo" : ""].join(" ");
+        return `<button type="button" class="${cls}" data-m="${ym}" title="${disp.includes(ym) ? "" : "Sem dados publicados"}">${n}</button>`;
+      }).join("");
+      el.querySelector(".periodo-sel").textContent = iniSel ? (fimSel ? rotulo(lo, hi) : `${f.mes(iniSel)} — escolha o fim ou aplique`) : "";
+    }
+    btn.addEventListener("click", () => {
+      const abrir = pop.classList.contains("hidden");
+      pop.classList.toggle("hidden");
+      if (abrir) { iniSel = de; fimSel = ate; ano = +(ate || ultimo()).slice(0, 4); desenhar(); }
+    });
+    pop.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      if (b.dataset.p != null) { const [a, z] = presets[+b.dataset.p][1](); return aplicar(a, z); }
+      if (b.dataset.a) { ano += +b.dataset.a; return desenhar(); }
+      if (b.dataset.m) { if (!iniSel || fimSel) { iniSel = b.dataset.m; fimSel = null; } else fimSel = b.dataset.m; return desenhar(); }
+      if (b.dataset.x === "cancelar") return pop.classList.add("hidden");
+      if (b.dataset.x === "aplicar" && iniSel) return aplicar(iniSel, fimSel || iniSel);
+    });
+    document.addEventListener("click", (e) => { if (!el.contains(e.target)) pop.classList.add("hidden"); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") pop.classList.add("hidden"); });
+    const api = {
+      /** Informa os meses com dados; mantém a escolha se ainda fizer sentido, senão usa os últimos 12 meses. */
+      atualizar(meses) {
+        disp = (meses || []).slice().sort();
+        if (!de && op.chave) try { const s = JSON.parse(localStorage.getItem(op.chave) || "null"); if (s && s.de && s.ate) { de = s.de; ate = s.ate; } } catch { }
+        const fora = !de || !disp.length || ate < disp[0] || de > disp.at(-1);
+        if (fora) { const [a, z] = presets[3][1](); de = disp.length && a < disp[0] ? disp[0] : a; ate = z; }
+        btn.querySelector("span").textContent = rotulo(de, ate);
+      },
+      meses: () => (de && ate ? PB.mesesEntre(de, ate) : []),
+      definir(a, z) { aplicar(a, z); },
+      get de() { return de; }, get ate() { return ate; }
+    };
+    return api;
+  };
+
   /* Tabela de demonstrativo (linhas x meses) */
   UI.tabelaDemonstrativo = function (el, meses, linhas, opts = {}) {
     const total = opts.total !== false;

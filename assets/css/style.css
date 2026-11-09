@@ -274,6 +274,43 @@ textarea { resize: vertical; min-height: 110px; }
 .view { display: none; }
 .view.active { display: block; }
 
+/* Seletor de período (calendário de meses) */
+.periodo { position: relative; }
+.periodo-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; font: 500 13px var(--sans); color: var(--noite-800); background: var(--surface); border: 1px solid var(--border); border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.periodo-btn:hover { border-color: var(--azul); }
+.periodo-btn svg { color: var(--azul); }
+.periodo-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 60; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 14px 40px rgba(6,26,48,.16); display: grid; grid-template-columns: 170px 280px; overflow: hidden; }
+.periodo-pop.hidden { display: none; }
+.periodo-presets { background: var(--azul-gelo); padding: 10px 0; display: flex; flex-direction: column; }
+.periodo-presets button { background: none; border: 0; text-align: left; padding: 8px 16px; font: 400 13px var(--sans); color: var(--noite-800); cursor: pointer; }
+.periodo-presets button:hover { background: rgba(0,112,189,.1); color: var(--azul-escuro); }
+.periodo-cal { padding: 14px 16px 12px; }
+.periodo-ano { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font: 600 15px var(--serif); color: var(--noite-900); }
+.periodo-ano button { background: none; border: 1px solid var(--border); border-radius: 6px; width: 30px; height: 28px; cursor: pointer; color: var(--noite-800); }
+.periodo-ano button:disabled { opacity: .35; cursor: default; }
+.periodo-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.periodo-grid button { padding: 9px 0; border: 1px solid var(--border); background: var(--surface); border-radius: 6px; font: 500 13px var(--sans); color: var(--noite-800); cursor: pointer; text-transform: capitalize; }
+.periodo-grid button.sem-dados { color: #a8b3bf; border-style: dashed; }
+.periodo-grid button.no-intervalo { background: var(--azul-gelo); border-color: #bcd9ef; }
+.periodo-grid button.ponta { background: var(--azul); border-color: var(--azul); color: #fff; }
+.periodo-grid button:hover:not(.ponta) { border-color: var(--azul); }
+.periodo-rodape { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; color: var(--pedra); }
+.periodo-dica { font-size: 11px; color: var(--pedra); margin-top: 8px; }
+@media (max-width: 640px) { .periodo-pop { grid-template-columns: 1fr; right: auto; left: 0; width: min(92vw, 300px); } .periodo-presets { flex-direction: row; flex-wrap: wrap; padding: 6px; } .periodo-presets button { padding: 6px 10px; } }
+
+/* Portal do cliente aberto pelo consultor */
+.side-link.voltar { color: var(--azul-claro); border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 6px; padding-bottom: 12px; }
+body.embed .app { grid-template-columns: 1fr; }
+body.embed .sidebar, body.embed .menu-btn, body.embed #sel-cliente, body.embed .demo-banner { display: none !important; }
+body.embed .topbar { position: sticky; padding: 12px 24px; }
+body.embed .content { padding: 22px 24px 48px; }
+.embed-tabs { display: none; }
+body.embed .embed-tabs { display: flex; gap: 4px; flex-wrap: wrap; width: 100%; order: 3; border-top: 1px solid var(--border); padding-top: 10px; }
+body.embed .embed-tabs .side-link { width: auto; color: var(--noite-800); padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; font-size: 13px; }
+body.embed .embed-tabs .side-link svg { display: none; }
+body.embed .embed-tabs .side-link.active { background: var(--azul); color: #fff; border-color: var(--azul); }
+.frame-cliente { width: 100%; height: calc(100vh - 150px); min-height: 640px; border: 1px solid var(--border); border-radius: 12px; background: var(--papel); display: block; }
+
 .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 500; letter-spacing: .02em; }
 .badge-ok { background: #e7efe5; color: #3f5f3b; }
 .badge-warn { background: #f4ecdb; color: #7a5c22; }

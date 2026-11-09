@@ -24,7 +24,7 @@ function estrutura(d, meses, tipo) {
     if (!c) { const m = /^\s*(\d[\d.]*)\s*[-–]\s*(.+)$/.exec(String(l.categoria || "")); if (m) c = idx.get(E.norm(m[1])) || idx.get(E.norm(m[2])); }
     let linha = c && c[ref];
     if (linha === NAO) return;
-    if (!linha) linha = tipo === "DRE" ? (l.tipo === "Receita" ? "Receita Bruta" : "Despesas Administrativas") : (l.tipo === "Receita" ? "Outras Entradas" : "Despesas Administrativas");
+    if (!linha) linha = tipo === "DRE" ? (l.tipo === "Receita" ? "Outras Receitas não Operacionais" : "Outras Despesas não Operacionais") : (l.tipo === "Receita" ? "Outras Entradas" : "Outras Despesas não Operacionais");
     const v = l.tipo === "Receita" ? l.valor : -l.valor;
     (folhas[linha] ||= meses.map(() => 0))[i] += v;
     const k = c ? `${c.numero} ${c.nome}` : `${l.categoria} (sem plano de contas)`;

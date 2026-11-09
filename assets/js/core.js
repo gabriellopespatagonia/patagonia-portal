@@ -134,6 +134,59 @@
   PB.caixaRealizado = (l) => (l.visao ? l.visao === "Caixa" && l.status === "Realizado" : l.status === "Realizado");
   PB.caixaPrevisto = (l) => l.visao !== "Competência" && l.status !== "Realizado";
 
+  /* ---------- Sugestão de classificação (DRE/DFC) ----------
+   * Usa a linha da DRE do Conta Azul (quando conhecida) para definir a família e o nome da categoria
+   * para escolher a linha exata da estrutura padrão. */
+  const sa = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+  const CMV_NOME = "Custo das Mercadorias Vendidas, dos Produtos Vendidos e dos Serviços Prestados (CMV/CPV/CSP)";
+  function familia(t, tipo) {
+    if (/deprecia|amortiza/.test(t)) return "DEP";
+    if (/imposto de renda|irpj|irpf|csll|contribuicao social|impostos? sobre (o )?lucro|provis/.test(t)) return "RAIR";
+    if (/distribuicao de lucro|dividendo|lucros? distribu|participac|debenture/.test(t)) return "DIST";
+    if (/dedu|devoluc|cancelad|abatimento|impostos? sobre (as )?(vendas|faturamento|receita)|simples nacional|\bicms\b|\bpis\b|cofins|\biss\b|desconto.{0,15}concedid/.test(t)) return "DED";
+    if (/financeir|rendimento|aplicac|juros|tarifa|\biof\b|bancari/.test(t)) return "RF";
+    if (/nao operacion|outras receitas|outras despesas|venda de (ativo|imobilizado)|ganho|perda/.test(t)) return "RNO";
+    if (/custo|cmv|cpv|csp|mercadoria|materias?.?primas?|insumo|produc|embalage|desconto.{0,20}obtid|aplicad.{0,25}servic|servicos prestados/.test(t)) return "CV";
+    if (tipo === "Receita" && /receita|venda|servico|faturament|bruta/.test(t)) return "RB";
+    return tipo === "Receita" ? "RNO" : "DESP";
+  }
+  PB.sugestaoDRE = function (linhaContaAzul, categoria, tipo) {
+    const ca = sa(linhaContaAzul), cat = sa(categoria).replace(/^\s*\d[\d.]*\s*[-–]\s*/, "");
+    let fam = ca ? familia(ca, tipo) : familia(cat, tipo);
+    // a linha do Conta Azul genérica ("despesas operacionais") deixa a categoria decidir
+    if (ca && (fam === "DESP" || (fam === "RNO" && !/nao operacion/.test(ca)))) { const f2 = familia(cat, tipo); if (f2 !== "DESP" && f2 !== "RNO") fam = f2; }
+    const rec = tipo === "Receita";
+    switch (fam) {
+      case "RB": return "Receita Bruta";
+      case "DED": return /devoluc|cancelad/.test(cat) ? "Vendas Canceladas" : /desconto/.test(cat) ? "Descontos Concedidos" : /imposto|simples|icms|pis|cofins|\biss\b|\bdas\b/.test(cat + " " + ca) ? "Impostos sobre Vendas" : "Outras Deduções da Receita Bruta";
+      case "CV": return /mao de obra|salario|folha/.test(cat) ? "Mão de Obra Direta" : CMV_NOME;
+      case "RF": return rec ? "Receitas Financeiras" : "Despesas Financeiras";
+      case "RNO": return rec ? "Outras Receitas não Operacionais" : "Outras Despesas não Operacionais";
+      case "DEP": return "Depreciação e Amortização";
+      case "RAIR": return /csll|contribuicao social/.test(cat + " " + ca) ? "Provisão para Contribuição Social sobre o Lucro Líquido (CSLL)" : "Provisão para Imposto de Renda Pessoa Jurídica (IRPJ) / Pessoa Física (IRPF)";
+      case "DIST": return /participac|debenture/.test(cat) ? "Participações, Debêntures e Outras" : "Distribuição de Lucros";
+    }
+    const t = cat + " " + ca;
+    if (/comiss|despesas? (com|de) vendas|marketplace|maquininha|taxa.{0,12}cart|frete.{0,12}venda/.test(t)) return "Despesas com Vendas";
+    if (/logistic|frete|entrega|combustiv|transport|veicul|pedagio/.test(t)) return "Despesas com Operação e Logística";
+    if (/marketing|publicidade|propaganda|anuncio|midia/.test(t)) return "Despesas com Marketing";
+    if (/comercial|representa/.test(t)) return "Despesas com Comercial";
+    if (/aluguel|condominio|iptu|energia|eletric|agua|ocupac|predial|imovel/.test(t)) return "Despesas com Ocupação";
+    if (/pro.?labore|diretoria|socios?\b|retirada/.test(t)) return "Despesas de Diretoria";
+    if (/pessoal|salari|folha|ferias|13o|decimo|inss|fgts|beneficio|vale|rescis|funcionari/.test(t)) return "Despesa com Pessoal";
+    return "Despesas Administrativas";
+  };
+  /** Linha do DFC correspondente a uma linha da DRE. */
+  PB.sugestaoDFC = function (refDRE, tipo) {
+    const E = PB.E, nomesDFC = new Set(E.atribuiveis("DFC"));
+    if (refDRE === E.NAO_DRE) return tipo === "Receita" ? "Outras Entradas" : "Outras Despesas não Operacionais";
+    if (refDRE === "Depreciação e Amortização") return E.NAO_DFC;
+    if (nomesDFC.has(refDRE)) return refDRE;
+    if (refDRE === "Receitas Financeiras") return "Outras Entradas";
+    if (/Distribuição|Participações|Despesas Financeiras/.test(refDRE)) return "Saídas do Fluxo de Caixa de Financiamentos";
+    return tipo === "Receita" ? "Outras Entradas" : "Outras Despesas não Operacionais";
+  };
+
   /* ---------------- Autenticação ---------------- */
   const SESSAO = "pb_sessao";
   PB.auth = {
@@ -251,8 +304,9 @@
       let linha = c && c[ref];
       if (linha === NAO) return;
       if (!linha) {
+        // sem classificação: fica fora das linhas operacionais (não distorce faturamento, margens e EBITDA) e é sinalizada
         naoClass.add(l.categoria);
-        linha = tipo === "DRE" ? (l.tipo === "Receita" ? "Receita Bruta" : "Despesas Administrativas") : (l.tipo === "Receita" ? "Outras Entradas" : "Despesas Administrativas");
+        linha = tipo === "DRE" ? (l.tipo === "Receita" ? "Outras Receitas não Operacionais" : "Outras Despesas não Operacionais") : (l.tipo === "Receita" ? "Outras Entradas" : "Outras Despesas não Operacionais");
       }
       const v = l.tipo === "Receita" ? l.valor : -l.valor;
       (folhas[linha] = folhas[linha] || meses.map(() => 0))[i] += v;

@@ -193,6 +193,26 @@ app.http("contaazulStatus", {
   })
 });
 
+/** Estrutura da DRE do Conta Azul do cliente (linhas, totalizadores e categorias de cada linha), achatada em ordem. */
+app.http("contaazulDre", {
+  methods: ["GET"], authLevel: "anonymous", route: "contaazul/dre",
+  handler: rota(async (req) => {
+    await exigirConsultor(req);
+    const id = req.query.get("cliente"); await exigirAcessoCliente(req, id);
+    const token = await tokenValido(id);
+    const j = await chamar(token, "/v1/financeiro/categorias-dre");
+    const raiz = Array.isArray(j) ? j : (j && (j.itens || j.items || j.estrutura || j.categorias_dre)) || (j ? [j] : []);
+    const linhas = [];
+    const andar = (itens, nivel, pai) => (itens || []).slice().sort((a, b) => (a.posicao ?? 0) - (b.posicao ?? 0)).forEach((it) => {
+      linhas.push({ id: it.id, codigo: it.codigo || "", descricao: it.descricao || "", nivel, pai, totalizador: !!it.indica_totalizador, custoMedio: !!it.representa_soma_custo_medio,
+        categorias: (it.categorias_financeiras || []).map((c) => ({ codigo: c.codigo || "", nome: c.nome || "" })), temFilhos: !!(it.subitens && it.subitens.length) });
+      andar(it.subitens, nivel + 1, it.id);
+    });
+    andar(raiz, 0, null);
+    return { linhas };
+  })
+});
+
 app.http("contaazulDesconectar", {
   methods: ["POST"], authLevel: "anonymous", route: "contaazul/desconectar",
   handler: rota(async (req) => {

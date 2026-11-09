@@ -11,13 +11,27 @@
   const $ = (id) => document.getElementById(id);
 
   // Consultor pode visualizar o portal de qualquer cliente
+  const params = new URLSearchParams(location.search);
+  const embutido = params.get("embed") === "1" && window.parent !== window;
   if (usuario.papel === "consultor") {
-    const lista = await PB.api.get("/clientes");
-    const sel = $("sel-cliente"); sel.classList.remove("hidden");
-    sel.innerHTML = lista.map((c) => `<option value="${c.id}">${PB.esc(c.nome)}</option>`).join("");
-    clienteId = new URLSearchParams(location.search).get("cliente") || lista[0]?.id;
-    sel.value = clienteId;
-    sel.addEventListener("change", () => { clienteId = sel.value; carregar(); chat.limpar(); });
+    if (embutido) {
+      // dentro do portal do consultor: sem lateral; abas no topo; o cliente é escolhido no portal do consultor
+      document.body.classList.add("embed");
+      clienteId = params.get("cliente");
+      const abas = document.createElement("div"); abas.className = "embed-tabs";
+      document.querySelectorAll(".sidebar .side-link[data-view]").forEach((b) => abas.appendChild(b.cloneNode(true)));
+      document.querySelector(".topbar").appendChild(abas);
+    } else {
+      const lista = await PB.api.get("/clientes");
+      const sel = $("sel-cliente"); sel.classList.remove("hidden");
+      sel.innerHTML = lista.map((c) => `<option value="${c.id}">${PB.esc(c.nome)}</option>`).join("");
+      clienteId = params.get("cliente") || lista[0]?.id;
+      sel.value = clienteId;
+      sel.addEventListener("change", () => { clienteId = sel.value; carregar(); chat.limpar(); });
+      // volta ao portal do consultor sem novo login (a sessão é a mesma)
+      document.querySelector(".sidebar .brand").insertAdjacentHTML("afterend",
+        `<a class="side-link voltar" href="../consultor/index.html#clientes"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4L6 9l5 5"/></svg>Voltar ao portal do consultor</a>`);
+    }
   }
 
   const chat = UI.chat($("chat"), () => clienteId, [
@@ -28,7 +42,8 @@
   ]);
 
   /* Resumos do período (um por relatório) */
-  const periodoTxt = () => `${f.mes(meses[0])} a ${f.mes(meses.at(-1))}`;
+  const rotuloPeriodo = () => (!meses.length ? "" : meses.length === 1 ? f.mes(meses[0]) : `${f.mes(meses[0])} a ${f.mes(meses.at(-1))}`);
+  const periodoTxt = () => rotuloPeriodo();
   const perguntaIA = (nome) => (r) => `Faça uma análise do relatório ${nome} da empresa no período de ${periodoTxt()}. ` +
     `Observações automáticas já identificadas: ${r.obs.join(" | ")}. Explique os pontos mais relevantes, as possíveis causas e o que acompanhar nos próximos meses, em até 250 palavras.`;
   const resumos = {
@@ -56,12 +71,12 @@
     definirPeriodo(); render();
   }
 
+  // seletor de período em calendário: mês isolado ou período (de/até), lembrado por usuário
+  const seletor = UI.seletorPeriodo($("sel-periodo"), { chave: "pb_periodo_" + (usuario.email || "") + "_" + clienteId, aoMudar: () => { definirPeriodo(); render(); } });
   function definirPeriodo() {
-    const todos = PB.mesesDisponiveis(dados);
-    const p = $("sel-periodo").value;
-    meses = p === "ano" ? todos.filter((m) => m.startsWith(todos.at(-1).slice(0, 4))) : todos.slice(-Number(p));
+    seletor.atualizar(PB.mesesDisponiveis(dados));
+    meses = seletor.meses();
   }
-  $("sel-periodo").addEventListener("change", () => { definirPeriodo(); render(); });
 
   UI.navegacao((view) => { if (view) abaAtual = view; if (dados) render(); });
 
@@ -78,8 +93,10 @@
   const somaArr = (a) => PB.soma(a, (x) => x);
   // período anterior de mesmo tamanho (para variação dos KPIs)
   function periodoAnterior() {
-    const todos = PB.mesesDisponiveis(dados), i = todos.indexOf(meses[0]);
-    return i >= meses.length ? todos.slice(i - meses.length, i) : null;
+    const todos = PB.mesesDisponiveis(dados), n = meses.length;
+    if (!n) return null;
+    const ant = PB.mesesEntre(UI.somaMes(meses[0], -n), UI.somaMes(meses[0], -1));
+    return ant.some((m) => todos.includes(m)) ? ant : null;
   }
   function graficoComposicao(idPizza, idBarras, comp, limite = 6) {
     const top = comp.slice(0, limite), resto = comp.slice(limite);
@@ -97,7 +114,7 @@
     const fat = somaArr(t.receitaBruta), lb = somaArr(t.lucroBruto), lo = somaArr(t.ebitda), ll = somaArr(t.liquido);
     const v = (atual, chave) => (tA ? (atual - somaArr(tA[chave])) / Math.abs(somaArr(tA[chave]) || 1) : null);
     const leg = ant ? "vs período anterior" : "";
-    $("per-comp").textContent = `${f.mes(meses[0])} a ${f.mes(meses.at(-1))}`;
+    $("per-comp").textContent = rotuloPeriodo();
     $("kpis-comp").innerHTML =
       UI.kpiFin("Faturamento", fat, null, v(fat, "receitaBruta"), leg) +
       UI.kpiFin("Resultado Operacional Bruto (Margem de Contribuição)", lb, lb / fat, v(lb, "lucroBruto"), leg) +
