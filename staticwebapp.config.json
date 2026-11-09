@@ -5,7 +5,10 @@
     { "route": "/servidor-local.ps1", "statusCode": 404 },
     { "route": "/sharepoint-modelo/*", "statusCode": 404 },
     { "route": "/PUBLICAR.md", "statusCode": 404 },
-    { "route": "/README.md", "statusCode": 404 }
+    { "route": "/README.md", "statusCode": 404 },
+    { "route": "/assets/js/*", "headers": { "Cache-Control": "no-cache" } },
+    { "route": "/assets/css/*", "headers": { "Cache-Control": "no-cache" } },
+    { "route": "/*.html", "headers": { "Cache-Control": "no-cache" } }
   ],
   "globalHeaders": {
     "X-Content-Type-Options": "nosniff",
