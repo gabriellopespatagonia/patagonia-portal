@@ -85,7 +85,7 @@ Portal/
 3. Configuração do build: *App location* `/`, *Api location* `api`, *Output location* (vazio).
 4. Após criar, vá em **Configurações → Variáveis de ambiente** e adicione as chaves de `api/local.settings.example.json`:
    `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_SECRET`, `SHAREPOINT_HOST`, `SHAREPOINT_SITE_PATH`, `SHAREPOINT_PASTA_RAIZ`, `ANTHROPIC_API_KEY`, `CLAUDE_MODEL`.
-5. (Opcional) **Domínios personalizados** → `portal.patagoniabusiness.com.br`.
+5. (Opcional) **Domínios personalizados** → `www.patagoniabusiness.com.br`.
 
 ### 3.3 Chave do Claude
 Crie a chave em **console.anthropic.com → API Keys** e coloque em `ANTHROPIC_API_KEY`. O modelo padrão é `claude-opus-5-5`. Para reduzir custo, troque `CLAUDE_MODEL` por `claude-sonnet-5-5`.

@@ -1,6 +1,7 @@
 # Roteiro de publicação — Patagonia Business
 
 > **Situação atual**
+> - Endereço oficial: **https://www.patagoniabusiness.com.br** (CNAME `www` no registro.br → green-wave-0e66b3310.8.azurestaticapps.net; certificado gratuito do Azure).
 > - Site criado no Azure: **https://green-wave-0e66b3310.8.azurestaticapps.net** (assinatura "Patagonia Portal", grupo `patagonia-portal`, plano Free).
 > - Aplicativo do Entra ID: "Patagonia Portal API".
 >   - ID do aplicativo (cliente): `0dfe4a5a-8360-4b3a-9188-54ae016e8e07`
@@ -81,6 +82,6 @@ Os passos abaixo dependem do seu login, de cobrança ou de chaves secretas. Por 
 4. Se algo der erro, copie a mensagem e o registro em **Static Web App → Funções (APIs) → Logs / Application Insights** e me envie.
 
 ## Depois
-- **Domínio próprio:** em Static Web App → **Domínios personalizados**, por exemplo `portal.patagoniabusiness.com.br`.
+- **Domínio próprio:** em Static Web App → **Domínios personalizados**, por exemplo `www.patagoniabusiness.com.br`.
 - **Conta Azul:** seção 3.5 do README.
 - **Alterações futuras:** cada envio de código ao GitHub (`git push`) publica o site de novo, automaticamente.

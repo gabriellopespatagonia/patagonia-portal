@@ -11,7 +11,7 @@
     "SHAREPOINT_SITE_PATH": "/sites/PatagoniaBusiness.BPOFinanceiro",
     "SHAREPOINT_PASTA_RAIZ": "Portal",
 
-    "PORTAL_URL": "https://portal.patagoniabusiness.com.br",
+    "PORTAL_URL": "https://www.patagoniabusiness.com.br",
     "MAIL_REMETENTE": "portal@patagoniaconsultoria.com.br",
 
     "ANTHROPIC_API_KEY": "<chave da API do Claude>",
@@ -20,7 +20,7 @@
 
     "CONTAAZUL_CLIENT_ID": "<client id do app no portal developers.contaazul.com>",
     "CONTAAZUL_CLIENT_SECRET": "<client secret>",
-    "CONTAAZUL_REDIRECT_URI": "https://portal.patagoniabusiness.com.br/api/contaazul/callback",
+    "CONTAAZUL_REDIRECT_URI": "https://www.patagoniabusiness.com.br/api/contaazul/callback",
     "CONTAAZUL_STATE_SECRET": "<texto aleatório longo>",
     "CONTAAZUL_AUTH_URL": "https://auth.contaazul.com/login",
     "CONTAAZUL_TOKEN_URL": "https://auth.contaazul.com/oauth2/token",

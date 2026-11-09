@@ -10,7 +10,7 @@ const sp = require("../lib/graph");
 const { exigirConsultor, exigirAcessoCliente, httpErro, rota, invalidarCache } = require("../lib/acesso");
 
 const EMAIL_OK = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-const urlPortal = () => process.env.PORTAL_URL || "https://portal.patagoniabusiness.com.br";
+const urlPortal = () => process.env.PORTAL_URL || "https://www.patagoniabusiness.com.br";
 const esc = (s) => String(s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
 function modeloEmail(titulo, corpo) {

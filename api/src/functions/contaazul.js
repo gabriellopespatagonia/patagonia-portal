@@ -15,7 +15,7 @@ const { exigirConsultor, exigirAcessoCliente, httpErro, rota } = require("../lib
 const CFG = () => ({
   clientId: process.env.CONTAAZUL_CLIENT_ID,
   clientSecret: process.env.CONTAAZUL_CLIENT_SECRET,
-  redirect: process.env.CONTAAZUL_REDIRECT_URI, // ex.: https://portal.patagoniabusiness.com.br/api/contaazul/callback
+  redirect: process.env.CONTAAZUL_REDIRECT_URI, // ex.: https://www.patagoniabusiness.com.br/api/contaazul/callback
   authUrl: process.env.CONTAAZUL_AUTH_URL || "https://auth.contaazul.com/login",
   tokenUrl: process.env.CONTAAZUL_TOKEN_URL || "https://auth.contaazul.com/oauth2/token",
   scope: process.env.CONTAAZUL_SCOPE || "openid profile aws.cognito.signin.user.admin",
